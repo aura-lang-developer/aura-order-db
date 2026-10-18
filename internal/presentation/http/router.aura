@@ -1,0 +1,93 @@
+// ==============================================================================
+// Presentation Layer: HTTP Router & Route Aggregator
+// internal/presentation/http/router.aura - Configures Gin Routes & Handlers
+// ==============================================================================
+
+import { Engine, Default } from "../../../../gin/engine";
+import { GinContext } from "../../../../gin/context";
+import { CORS } from "../../../../gin/cors";
+import { AppConfig } from "../../infrastructure/config/config";
+import { OrderHttpHandler } from "./order_handler";
+import { SupplierHttpHandler } from "./supplier_handler";
+import { HealthHttpHandler } from "./health_handler";
+
+export fn SetupRouter(
+  orderHandler: OrderHttpHandler,
+  supplierHandler: SupplierHttpHandler,
+  healthHandler: HealthHttpHandler,
+  config: AppConfig
+): *Engine => {
+  let mut r = Default();
+
+  // Global Cross-Origin Resource Sharing (CORS) Middleware
+  r.Use(CORS());
+
+  // Root Service Directory
+  r.GET("/", fn(c: GinContext): Unit => {
+    c.JSON(StatusOK, {
+      service: config.serviceName,
+      version: config.version,
+      architecture: "Onion Architecture (Clean / Hexagonal)",
+      database: "PostgreSQL",
+      status: "running",
+      endpoints: [
+        "GET  /",
+        "GET  /health",
+        "GET  /api/v1/suppliers",
+        "POST /api/v1/suppliers",
+        "GET  /api/v1/suppliers/:id",
+        "GET  /api/v1/orders",
+        "POST /api/v1/orders",
+        "GET  /api/v1/orders/:id",
+        "POST /api/v1/orders/:id/approve",
+        "POST /api/v1/orders/:id/cancel",
+        "POST /api/v1/orders/:id/fulfill"
+      ]
+    });
+  });
+
+  // Health Check
+  r.GET("/health", async fn(c: GinContext): Task<Unit, String> => {
+    await healthHandler.HandleHealth(c);
+  });
+
+  // Supplier Endpoints
+  r.GET("/api/v1/suppliers", async fn(c: GinContext): Task<Unit, String> => {
+    await supplierHandler.HandleListSuppliers(c);
+  });
+
+  r.POST("/api/v1/suppliers", async fn(c: GinContext): Task<Unit, String> => {
+    await supplierHandler.HandleCreateSupplier(c);
+  });
+
+  r.GET("/api/v1/suppliers/:id", async fn(c: GinContext): Task<Unit, String> => {
+    await supplierHandler.HandleGetSupplierById(c);
+  });
+
+  // Purchase Order Endpoints
+  r.GET("/api/v1/orders", async fn(c: GinContext): Task<Unit, String> => {
+    await orderHandler.HandleListOrders(c);
+  });
+
+  r.POST("/api/v1/orders", async fn(c: GinContext): Task<Unit, String> => {
+    await orderHandler.HandleCreateOrder(c);
+  });
+
+  r.GET("/api/v1/orders/:id", async fn(c: GinContext): Task<Unit, String> => {
+    await orderHandler.HandleGetOrderById(c);
+  });
+
+  r.POST("/api/v1/orders/:id/approve", async fn(c: GinContext): Task<Unit, String> => {
+    await orderHandler.HandleApproveOrder(c);
+  });
+
+  r.POST("/api/v1/orders/:id/cancel", async fn(c: GinContext): Task<Unit, String> => {
+    await orderHandler.HandleCancelOrder(c);
+  });
+
+  r.POST("/api/v1/orders/:id/fulfill", async fn(c: GinContext): Task<Unit, String> => {
+    await orderHandler.HandleFulfillOrder(c);
+  });
+
+  r
+}

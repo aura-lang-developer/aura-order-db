@@ -1,0 +1,20 @@
+// ==============================================================================
+// Infrastructure Layer: CSP Event Bus Adapter
+// internal/infrastructure/messaging/csp_event_bus.aura - In-Memory Asynchronous Pub/Sub
+// ==============================================================================
+
+import { DomainEvent } from "../../domain/events";
+
+export struct CSPEventBus {
+  eventsCount: Int
+};
+
+export fn NewCSPEventBus(): CSPEventBus => {
+  { eventsCount: 0 }
+}
+
+// Publishes a domain event asynchronously
+fn (bus: *CSPEventBus) Publish(event: DomainEvent): Unit => {
+  bus.eventsCount = bus.eventsCount + 1;
+  println(`📣 [CSP-EventBus] Event Published: ${event.eventType} on ${event.aggregateType} [ID: ${event.aggregateId}]`);
+}

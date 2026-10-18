@@ -1,0 +1,332 @@
+// ==============================================================================
+// Aura ORM - Schema & Migrations Module
+// src/schema/schema.aura - DDL Schema Definition & Table Migrations
+// ==============================================================================
+
+import { Dialect, QuoteIdentifier } from "../dialect/dialect";
+
+export struct ColumnDef {
+  __aura_type: String,
+  name: String,
+  dataType: String, // "INTEGER", "BIGINT", "VARCHAR", "TEXT", "BOOLEAN", "NUMERIC", "TIMESTAMP"
+  length: Int,      // for VARCHAR length (e.g. 255)
+  isPrimary: Bool,
+  isNullable: Bool,
+  isUnique: Bool,
+  defaultValue: String,
+  refTable: String,
+  refColumn: String,
+  onDeleteAction: String
+};
+
+export fn IntegerColumn(name: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "INTEGER",
+    length: 0,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn BigIntColumn(name: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "BIGINT",
+    length: 0,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn StringColumn(name: String, len: Int): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "VARCHAR",
+    length: len,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn TextColumn(name: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "TEXT",
+    length: 0,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn BoolColumn(name: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "BOOLEAN",
+    length: 0,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn NumericColumn(name: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "NUMERIC(14, 2)",
+    length: 0,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn TimestampColumn(name: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: name,
+    dataType: "TIMESTAMP",
+    length: 0,
+    isPrimary: false,
+    isNullable: false,
+    isUnique: false,
+    defaultValue: "CURRENT_TIMESTAMP",
+    refTable: "",
+    refColumn: "",
+    onDeleteAction: ""
+  }
+};
+
+export fn (col: ColumnDef) PrimaryKey(): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: col.name,
+    dataType: col.dataType,
+    length: col.length,
+    isPrimary: true,
+    isNullable: false,
+    isUnique: true,
+    defaultValue: col.defaultValue,
+    refTable: col.refTable,
+    refColumn: col.refColumn,
+    onDeleteAction: col.onDeleteAction
+  }
+};
+
+export fn (col: ColumnDef) Nullable(): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: col.name,
+    dataType: col.dataType,
+    length: col.length,
+    isPrimary: col.isPrimary,
+    isNullable: true,
+    isUnique: col.isUnique,
+    defaultValue: col.defaultValue,
+    refTable: col.refTable,
+    refColumn: col.refColumn,
+    onDeleteAction: col.onDeleteAction
+  }
+};
+
+export fn (col: ColumnDef) Unique(): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: col.name,
+    dataType: col.dataType,
+    length: col.length,
+    isPrimary: col.isPrimary,
+    isNullable: col.isNullable,
+    isUnique: true,
+    defaultValue: col.defaultValue,
+    refTable: col.refTable,
+    refColumn: col.refColumn,
+    onDeleteAction: col.onDeleteAction
+  }
+};
+
+export fn (col: ColumnDef) Default(val: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: col.name,
+    dataType: col.dataType,
+    length: col.length,
+    isPrimary: col.isPrimary,
+    isNullable: col.isNullable,
+    isUnique: col.isUnique,
+    defaultValue: val,
+    refTable: col.refTable,
+    refColumn: col.refColumn,
+    onDeleteAction: col.onDeleteAction
+  }
+};
+
+export fn (col: ColumnDef) References(table: String, column: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: col.name,
+    dataType: col.dataType,
+    length: col.length,
+    isPrimary: col.isPrimary,
+    isNullable: col.isNullable,
+    isUnique: col.isUnique,
+    defaultValue: col.defaultValue,
+    refTable: table,
+    refColumn: column,
+    onDeleteAction: col.onDeleteAction
+  }
+};
+
+export fn (col: ColumnDef) OnDelete(action: String): ColumnDef => {
+  {
+    __aura_type: "ColumnDef",
+    name: col.name,
+    dataType: col.dataType,
+    length: col.length,
+    isPrimary: col.isPrimary,
+    isNullable: col.isNullable,
+    isUnique: col.isUnique,
+    defaultValue: col.defaultValue,
+    refTable: col.refTable,
+    refColumn: col.refColumn,
+    onDeleteAction: action
+  }
+};
+
+// ==============================================================================
+// Table Schema
+// ==============================================================================
+
+export struct TableSchema {
+  __aura_type: String,
+  name: String,
+  columns: []ColumnDef
+};
+
+export fn NewTable(name: String): TableSchema => {
+  let emptyCols: []ColumnDef = [];
+  {
+    __aura_type: "TableSchema",
+    name: name,
+    columns: emptyCols
+  }
+};
+
+export fn (t: TableSchema) AddColumn(col: ColumnDef): TableSchema => {
+  let mut newCols = t.columns;
+  newCols.push(col);
+  {
+    __aura_type: "TableSchema",
+    name: t.name,
+    columns: newCols
+  }
+};
+
+fn formatColumnDdl(col: ColumnDef, dialect: Dialect): String => {
+  let qName = QuoteIdentifier(dialect, col.name);
+
+  // Type representation
+  let mut typeStr = col.dataType;
+  if col.dataType == "VARCHAR" {
+    let l = if col.length > 0 { col.length } else { 255 };
+    typeStr = `VARCHAR(${l})`;
+  };
+
+  if col.isPrimary && dialect.name == "postgres" && col.dataType == "INTEGER" {
+    typeStr = "SERIAL PRIMARY KEY";
+    return `${qName} ${typeStr}`;
+  };
+
+  if col.isPrimary && dialect.name == "sqlite" && col.dataType == "INTEGER" {
+    typeStr = "INTEGER PRIMARY KEY AUTOINCREMENT";
+    return `${qName} ${typeStr}`;
+  };
+
+  let mut ddl = `${qName} ${typeStr}`;
+
+  if col.isPrimary {
+    ddl = `${ddl} PRIMARY KEY`;
+  };
+
+  if !col.isNullable && !col.isPrimary {
+    ddl = `${ddl} NOT NULL`;
+  };
+
+  if col.isUnique && !col.isPrimary {
+    ddl = `${ddl} UNIQUE`;
+  };
+
+  if len(col.defaultValue) > 0 {
+    ddl = `${ddl} DEFAULT ${col.defaultValue}`;
+  };
+
+  if len(col.refTable) > 0 {
+    let target = if len(col.refColumn) > 0 { `${col.refTable}(${col.refColumn})` } else { col.refTable };
+    ddl = `${ddl} REFERENCES ${target}`;
+    if len(col.onDeleteAction) > 0 {
+      ddl = `${ddl} ON DELETE ${col.onDeleteAction}`;
+    };
+  };
+
+  ddl
+};
+
+export fn (t: TableSchema) ToCreateTableSql(dialect: Dialect): String => {
+  let mut colDefs: []String = [];
+  for c in t.columns {
+    colDefs.push(formatColumnDdl(c, dialect));
+  }
+
+  let count = len(colDefs);
+  let mut inner = "";
+  if count > 0 {
+    inner = colDefs[0];
+    let mut i = 1;
+    while i < count {
+      inner = `${inner}, ${colDefs[i]}`;
+      i = i + 1;
+    }
+  };
+
+  let qTable = QuoteIdentifier(dialect, t.name);
+  `CREATE TABLE IF NOT EXISTS ${qTable} (${inner});`
+};
+
+export fn (t: TableSchema) ToDropTableSql(dialect: Dialect): String => {
+  let qTable = QuoteIdentifier(dialect, t.name);
+  `DROP TABLE IF EXISTS ${qTable};`
+};

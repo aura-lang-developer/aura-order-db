@@ -1,0 +1,116 @@
+// ==============================================================================
+// Unit Test Suite: Schema & DDL Migrations
+// tests/schema_test.aura - Tests Table Definitions and Dialect-Specific DDL
+// ==============================================================================
+
+import { PostgresOrm, MysqlOrm, SqliteOrm } from "../src/orm";
+import {
+  IntegerColumn,
+  BigIntColumn,
+  StringColumn,
+  TextColumn,
+  BoolColumn,
+  TimestampColumn
+} from "../src/schema/schema";
+
+export fn main(): Unit => {
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧪 AURA-ORM: SCHEMA & DDL MIGRATIONS TEST SUITE");
+  println("================================================================================");
+
+  let pg = PostgresOrm();
+  let sqlite = SqliteOrm();
+
+  // ----------------------------------------------------------------------------
+  // TEST 1: PostgreSQL DDL with SERIAL PRIMARY KEY and DEFAULT
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 1] PostgreSQL CREATE TABLE DDL:");
+  let usersTable = pg.DefineTable("users")
+    .AddColumn(IntegerColumn("id").PrimaryKey())
+    .AddColumn(StringColumn("name", 100))
+    .AddColumn(StringColumn("email", 150).Unique())
+    .AddColumn(BoolColumn("is_active").Default("true"))
+    .AddColumn(TimestampColumn("created_at"));
+
+  let pgDdl = usersTable.ToCreateTableSql(pg.dialect);
+  let expectedPg = "CREATE TABLE IF NOT EXISTS \"users\" (\"id\" SERIAL PRIMARY KEY, \"name\" VARCHAR(100) NOT NULL, \"email\" VARCHAR(150) NOT NULL UNIQUE, \"is_active\" BOOLEAN NOT NULL DEFAULT true, \"created_at\" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);";
+
+  if pgDdl == expectedPg {
+    println("  ✓ PASS: Correct PostgreSQL DDL generated");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedPg}'\n       Got: '${pgDdl}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 2: SQLite DDL with AUTOINCREMENT
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 2] SQLite CREATE TABLE DDL:");
+  let tasksTable = sqlite.DefineTable("tasks")
+    .AddColumn(IntegerColumn("id").PrimaryKey())
+    .AddColumn(TextColumn("description"))
+    .AddColumn(BoolColumn("completed").Default("false"));
+
+  let sqliteDdl = tasksTable.ToCreateTableSql(sqlite.dialect);
+  let expectedSqlite = "CREATE TABLE IF NOT EXISTS \"tasks\" (\"id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"description\" TEXT NOT NULL, \"completed\" BOOLEAN NOT NULL DEFAULT false);";
+
+  if sqliteDdl == expectedSqlite {
+    println("  ✓ PASS: Correct SQLite DDL with AUTOINCREMENT generated");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSqlite}'\n       Got: '${sqliteDdl}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 3: DROP TABLE DDL
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 3] DROP TABLE IF EXISTS DDL:");
+  let dropSql = usersTable.ToDropTableSql(pg.dialect);
+  let expectedDrop = "DROP TABLE IF EXISTS \"users\";";
+
+  if dropSql == expectedDrop {
+    println("  ✓ PASS: Correct DROP TABLE generated");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedDrop}' but got '${dropSql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 4: PostgreSQL Foreign Key with ON DELETE CASCADE
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 4] PostgreSQL Foreign Key with ON DELETE CASCADE:");
+  let itemsTable = pg.DefineTable("order_items")
+    .AddColumn(IntegerColumn("id").PrimaryKey())
+    .AddColumn(StringColumn("order_id", 64).References("orders", "id").OnDelete("CASCADE"))
+    .AddColumn(StringColumn("product_sku", 64));
+
+  let itemsDdl = itemsTable.ToCreateTableSql(pg.dialect);
+  let expectedItemsDdl = "CREATE TABLE IF NOT EXISTS \"order_items\" (\"id\" SERIAL PRIMARY KEY, \"order_id\" VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE, \"product_sku\" VARCHAR(64) NOT NULL);";
+
+  if itemsDdl == expectedItemsDdl {
+    println("  ✓ PASS: Correct Foreign Key with ON DELETE CASCADE generated");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedItemsDdl}'\n       Got: '${itemsDdl}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // RESULTS SUMMARY
+  // ----------------------------------------------------------------------------
+  println("================================================================================");
+  println(`  🏁 SUMMARY: ${passed} Passed, ${failed} Failed`);
+  println("================================================================================");
+
+  if failed > 0 {
+    println("❌ Schema test suite encountered failures!");
+  } else {
+    println("✅ All schema & migration tests passed successfully!");
+  };
+}

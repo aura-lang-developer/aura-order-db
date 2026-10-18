@@ -1,0 +1,71 @@
+// ==============================================================================
+// Application Layer: Supplier Use Case Service
+// internal/application/services/supplier_usecase.aura - Orchestrates Supplier Management
+// ==============================================================================
+
+import { Supplier, NewSupplier } from "../../domain/model/supplier";
+import { CreateSupplierRequestDTO } from "../dto/order_dto";
+import { ISupplierRepository, IAuditService } from "../interfaces/ports";
+import { FormatSupplierNotFound } from "../../domain/errors";
+
+export struct SupplierUseCase {
+  supplierRepo: ISupplierRepository,
+  auditService: IAuditService
+};
+
+export fn NewSupplierUseCase(
+  supplierRepo: ISupplierRepository,
+  auditService: IAuditService
+): SupplierUseCase => {
+  {
+    supplierRepo: supplierRepo,
+    auditService: auditService
+  }
+}
+
+// Registers a new supplier in the catalog
+export async fn (uc: SupplierUseCase) CreateSupplier(req: CreateSupplierRequestDTO): Task<Result<Supplier, String>, String> => {
+  let supRes = NewSupplier(
+    req.id,
+    req.name,
+    req.email,
+    req.taxId,
+    req.phone,
+    req.address
+  );
+
+  match supRes {
+    Ok(sup) => {
+      let saveRes = await uc.supplierRepo.Save(sup);
+      match saveRes {
+        Ok(_) => {
+          let _ = await uc.auditService.LogAudit(
+            "CREATE",
+            "Supplier",
+            sup.id,
+            "admin",
+            `Created supplier '${sup.name}' with Tax ID ${sup.taxId}`
+          );
+          Ok(sup)
+        },
+        Err(err) => Err(err)
+      }
+    },
+    Err(err) => Err(err)
+  }
+};
+
+// Retrieves a supplier by identifier
+export async fn (uc: SupplierUseCase) GetSupplierById(id: String): Task<Result<Supplier, String>, String> => {
+  let opt = await uc.supplierRepo.FindById(id);
+  match opt {
+    Some(s) => Ok(s),
+    None => Err(FormatSupplierNotFound(id))
+  }
+};
+
+// Lists all registered suppliers
+export async fn (uc: SupplierUseCase) ListSuppliers(): Task<[]Supplier, String> => {
+  let list = await uc.supplierRepo.FindAll();
+  list
+};

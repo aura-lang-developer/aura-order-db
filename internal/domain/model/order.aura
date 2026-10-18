@@ -1,0 +1,166 @@
+// ==============================================================================
+// Domain Layer: Purchase Order Aggregate & OrderItem Value Object
+// internal/domain/model/order.aura - Pure Business Entities & Invariants
+// ==============================================================================
+
+import {
+  ErrEmptyOrderItems,
+  ErrInvalidItemQuantity,
+  ErrInvalidUnitPrice,
+  ErrOrderAlreadyApproved,
+  ErrOrderAlreadyCancelled,
+  ErrOrderAlreadyFulfilled,
+  ErrCannotCancelFulfilled,
+  FormatInvalidStatusTransition
+} from "../errors";
+
+// Order Status Helper Functions
+export fn StatusDraft(): String => "DRAFT";
+export fn StatusPendingApproval(): String => "PENDING_APPROVAL";
+export fn StatusApproved(): String => "APPROVED";
+export fn StatusIssued(): String => "ISSUED";
+export fn StatusFulfilled(): String => "FULFILLED";
+export fn StatusCancelled(): String => "CANCELLED";
+
+export struct OrderItem {
+  id: Int,
+  orderId: String,
+  productSku: String,
+  productName: String,
+  quantity: Int,
+  unitPrice: Float,
+  lineTotal: Float
+};
+
+export fn NewOrderItem(
+  orderId: String,
+  productSku: String,
+  productName: String,
+  quantity: Int,
+  unitPrice: Float
+): Result<OrderItem, String> => {
+  if quantity <= 0 {
+    return Err(ErrInvalidItemQuantity());
+  }
+  if unitPrice <= 0.0 {
+    return Err(ErrInvalidUnitPrice());
+  }
+
+  let qFloat = parseFloat(`${quantity}`);
+  let lineTotal = unitPrice * qFloat;
+  let item: OrderItem = {
+    id: 0,
+    orderId: orderId,
+    productSku: productSku,
+    productName: productName,
+    quantity: quantity,
+    unitPrice: unitPrice,
+    lineTotal: lineTotal
+  };
+
+  Ok(item)
+}
+
+export struct PurchaseOrder {
+  id: String,
+  orderNumber: String,
+  supplierId: String,
+  status: String,
+  currency: String,
+  subtotal: Float,
+  taxAmount: Float,
+  discountAmount: Float,
+  totalAmount: Float,
+  notes: String,
+  createdBy: String,
+  createdAt: String,
+  updatedAt: String,
+  items: []OrderItem
+};
+
+export fn NewPurchaseOrder(
+  id: String,
+  orderNumber: String,
+  supplierId: String,
+  currency: String,
+  notes: String,
+  createdBy: String,
+  items: []OrderItem,
+  subtotal: Float,
+  taxAmount: Float,
+  discountAmount: Float,
+  totalAmount: Float
+): Result<PurchaseOrder, String> => {
+  if len(items) == 0 {
+    return Err(ErrEmptyOrderItems());
+  }
+
+  let ts = time.isoString();
+  let ord: PurchaseOrder = {
+    id: id,
+    orderNumber: orderNumber,
+    supplierId: supplierId,
+    status: StatusPendingApproval(),
+    currency: if currency != "" { currency } else { "USD" },
+    subtotal: subtotal,
+    taxAmount: taxAmount,
+    discountAmount: discountAmount,
+    totalAmount: totalAmount,
+    notes: notes,
+    createdBy: createdBy,
+    createdAt: ts,
+    updatedAt: ts,
+    items: items
+  };
+
+  Ok(ord)
+}
+
+// Invariant: Approves a purchase order
+fn (order: *PurchaseOrder) Approve(): Result<Unit, String> => {
+  if order.status == StatusApproved() {
+    return Err(ErrOrderAlreadyApproved());
+  }
+  if order.status == StatusCancelled() {
+    return Err(FormatInvalidStatusTransition(order.status, StatusApproved()));
+  }
+  if order.status == StatusFulfilled() {
+    return Err(ErrOrderAlreadyFulfilled());
+  }
+
+  order.status = StatusApproved();
+  order.updatedAt = time.isoString();
+  Ok(())
+}
+
+// Invariant: Cancels a purchase order with a mandatory reason
+fn (order: *PurchaseOrder) Cancel(reason: String): Result<Unit, String> => {
+  if order.status == StatusCancelled() {
+    return Err(ErrOrderAlreadyCancelled());
+  }
+  if order.status == StatusFulfilled() {
+    return Err(ErrCannotCancelFulfilled());
+  }
+
+  order.status = StatusCancelled();
+  order.notes = if order.notes != "" { `${order.notes} | Cancellation Reason: ${reason}` } else { `Cancellation Reason: ${reason}` };
+  order.updatedAt = time.isoString();
+  Ok(())
+}
+
+// Invariant: Fulfills a purchase order (goods received)
+fn (order: *PurchaseOrder) Fulfill(): Result<Unit, String> => {
+  if order.status == StatusFulfilled() {
+    return Err(ErrOrderAlreadyFulfilled());
+  }
+  if order.status == StatusCancelled() {
+    return Err(FormatInvalidStatusTransition(order.status, StatusFulfilled()));
+  }
+  if order.status != StatusApproved() && order.status != StatusIssued() {
+    return Err(FormatInvalidStatusTransition(order.status, StatusFulfilled()));
+  }
+
+  order.status = StatusFulfilled();
+  order.updatedAt = time.isoString();
+  Ok(())
+}

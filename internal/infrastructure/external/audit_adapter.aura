@@ -1,0 +1,48 @@
+// ==============================================================================
+// Infrastructure Layer: PostgreSQL Security Audit Adapter
+// internal/infrastructure/external/audit_adapter.aura - Implements IAuditService
+// ==============================================================================
+
+import { AuraOrm, PostgresOrm } from "github.com/aura-lang-developer/aura-orm/src/orm";
+
+export struct PostgresAuditAdapter {
+  __aura_type: String,
+  auditDb: PgPool,
+  orm: AuraOrm
+};
+
+export fn NewPostgresAuditAdapter(db: PgPool): PostgresAuditAdapter => {
+  {
+    __aura_type: "PostgresAuditAdapter",
+    auditDb: db,
+    orm: PostgresOrm()
+  }
+}
+
+export async fn (adapter: PostgresAuditAdapter) LogAudit(
+  action: String,
+  entityType: String,
+  entityId: String,
+  actor: String,
+  details: String
+): Task<Unit, String> => {
+  let q = adapter.orm.InsertInto("audit_logs")
+    .Set("action", action)
+    .Set("entity_type", entityType)
+    .Set("entity_id", entityId)
+    .Set("actor", actor)
+    .Set("details", details)
+    .SetRaw("created_at", "CURRENT_TIMESTAMP")
+    .ToSql();
+
+  let res = await adapter.auditDb.execute(q.sql, q.params);
+
+  match res {
+    Ok(_) => {
+      println(`🛡️ [AuditLog] ${action} on ${entityType}:${entityId} by '${actor}'`);
+    },
+    Err(e) => {
+      println(`⚠️ [AuditLog Error] Could not persist audit entry: ${e}`);
+    }
+  }
+};

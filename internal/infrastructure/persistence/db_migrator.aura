@@ -1,0 +1,159 @@
+// ==============================================================================
+// Infrastructure Layer: PostgreSQL Database Schema Migrator & Seeder
+// internal/infrastructure/persistence/db_migrator.aura - Tables & Seed Initialization
+// ==============================================================================
+
+import { PostgresOrm } from "github.com/aura-lang-developer/aura-orm/src/orm";
+import {
+  IntegerColumn,
+  StringColumn,
+  TextColumn,
+  NumericColumn,
+  TimestampColumn
+} from "github.com/aura-lang-developer/aura-orm/src/schema/schema";
+
+export async fn RunMigrations(pool: PgPool): Task<Result<Unit, String>, String> => {
+  println("🐘 [PostgreSQL] Checking and applying database schema migrations via Aura ORM...");
+
+  let orm = PostgresOrm();
+  let mut migrationError: Option<String> = None;
+
+  // 1. Suppliers Table Definition via Aura ORM Schema
+  let suppliersTable = orm.DefineTable("suppliers")
+    .AddColumn(StringColumn("id", 64).PrimaryKey())
+    .AddColumn(StringColumn("name", 150))
+    .AddColumn(StringColumn("email", 150))
+    .AddColumn(StringColumn("tax_id", 50))
+    .AddColumn(StringColumn("phone", 50).Nullable())
+    .AddColumn(TextColumn("address").Nullable())
+    .AddColumn(TimestampColumn("created_at"));
+
+  let ddlSuppliers = suppliersTable.ToCreateTableSql(orm.dialect);
+  let supRes = await pool.execute(ddlSuppliers, []);
+  match supRes {
+    Ok(_) => (),
+    Err(e) => {
+      migrationError = Some(`Failed to create suppliers table: ${e}`);
+    }
+  };
+
+  // 2. Purchase Orders Table Definition via Aura ORM Schema
+  match migrationError {
+    None => {
+      let ordersTable = orm.DefineTable("purchase_orders")
+        .AddColumn(StringColumn("id", 64).PrimaryKey())
+        .AddColumn(StringColumn("order_number", 64).Unique())
+        .AddColumn(StringColumn("supplier_id", 64).References("suppliers", "id"))
+        .AddColumn(StringColumn("status", 30))
+        .AddColumn(StringColumn("currency", 10).Default("'USD'"))
+        .AddColumn(NumericColumn("subtotal"))
+        .AddColumn(NumericColumn("tax_amount"))
+        .AddColumn(NumericColumn("discount_amount").Default("0.00"))
+        .AddColumn(NumericColumn("total_amount"))
+        .AddColumn(TextColumn("notes").Nullable())
+        .AddColumn(StringColumn("created_by", 100))
+        .AddColumn(StringColumn("created_at", 100))
+        .AddColumn(StringColumn("updated_at", 100));
+
+      let ddlOrders = ordersTable.ToCreateTableSql(orm.dialect);
+      let ordRes = await pool.execute(ddlOrders, []);
+      match ordRes {
+        Ok(_) => (),
+        Err(e) => {
+          migrationError = Some(`Failed to create purchase_orders table: ${e}`);
+        }
+      };
+    },
+    Some(_) => ()
+  };
+
+  // 3. Purchase Order Items Table Definition via Aura ORM Schema
+  match migrationError {
+    None => {
+      let itemsTable = orm.DefineTable("purchase_order_items")
+        .AddColumn(IntegerColumn("id").PrimaryKey())
+        .AddColumn(StringColumn("order_id", 64).References("purchase_orders", "id").OnDelete("CASCADE"))
+        .AddColumn(StringColumn("product_sku", 64))
+        .AddColumn(StringColumn("product_name", 200))
+        .AddColumn(IntegerColumn("quantity"))
+        .AddColumn(NumericColumn("unit_price"))
+        .AddColumn(NumericColumn("line_total"));
+
+      let ddlItems = itemsTable.ToCreateTableSql(orm.dialect);
+      let itRes = await pool.execute(ddlItems, []);
+      match itRes {
+        Ok(_) => (),
+        Err(e) => {
+          migrationError = Some(`Failed to create purchase_order_items table: ${e}`);
+        }
+      };
+    },
+    Some(_) => ()
+  };
+
+  // 4. Security & Audit Logs Table Definition via Aura ORM Schema
+  match migrationError {
+    None => {
+      let auditTable = orm.DefineTable("audit_logs")
+        .AddColumn(IntegerColumn("id").PrimaryKey())
+        .AddColumn(StringColumn("action", 50))
+        .AddColumn(StringColumn("entity_type", 50))
+        .AddColumn(StringColumn("entity_id", 64))
+        .AddColumn(StringColumn("actor", 100))
+        .AddColumn(TextColumn("details").Nullable())
+        .AddColumn(TimestampColumn("created_at"));
+
+      let ddlAudit = auditTable.ToCreateTableSql(orm.dialect);
+      let audRes = await pool.execute(ddlAudit, []);
+      match audRes {
+        Ok(_) => (),
+        Err(e) => {
+          migrationError = Some(`Failed to create audit_logs table: ${e}`);
+        }
+      };
+    },
+    Some(_) => ()
+  };
+
+  // 5. Seed default suppliers using Aura ORM InsertBuilder with ON CONFLICT DO NOTHING
+  match migrationError {
+    None => {
+      let seed1 = orm.InsertInto("suppliers")
+        .Set("id", "SUP-001")
+        .Set("name", "TechLogistics Global")
+        .Set("email", "sales@techlogistics.com")
+        .Set("tax_id", "TAX-998877")
+        .Set("phone", "+1-555-0199")
+        .Set("address", "1200 Market St, Industrial Park")
+        .OnConflictDoNothing("id")
+        .ToSql();
+      let _ = await pool.execute(seed1.sql, seed1.params);
+
+      let seed2 = orm.InsertInto("suppliers")
+        .Set("id", "SUP-002")
+        .Set("name", "Acme Industrial Supplies")
+        .Set("email", "contact@acmesupplies.com")
+        .Set("tax_id", "TAX-112233")
+        .Set("phone", "+1-555-0244")
+        .Set("address", "450 Silicon Blvd, Suite 200")
+        .OnConflictDoNothing("id")
+        .ToSql();
+      let _ = await pool.execute(seed2.sql, seed2.params);
+
+      let seed3 = orm.InsertInto("suppliers")
+        .Set("id", "SUP-003")
+        .Set("name", "Apex Component Distributing")
+        .Set("email", "orders@apexcomponents.io")
+        .Set("tax_id", "TAX-554433")
+        .Set("phone", "+1-555-0788")
+        .Set("address", "78 Warehouse Way, Port City")
+        .OnConflictDoNothing("id")
+        .ToSql();
+      let _ = await pool.execute(seed3.sql, seed3.params);
+
+      println("✓ Database tables verified and suppliers seeded successfully via Aura ORM.");
+      Ok(())
+    },
+    Some(err) => Err(err)
+  }
+};

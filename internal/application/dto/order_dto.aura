@@ -1,0 +1,130 @@
+// ==============================================================================
+// Application Layer: Data Transfer Objects (DTOs) & Mappers
+// internal/application/dto/order_dto.aura - Decouples HTTP & Presentation from Domain
+// ==============================================================================
+
+import { PurchaseOrder, OrderItem } from "../../domain/model/order";
+import { Supplier } from "../../domain/model/supplier";
+
+// Inbound DTO: Item input within order creation
+export struct OrderItemInputDTO {
+  productSku: String,
+  productName: String,
+  quantity: Int,
+  unitPrice: Float
+};
+
+// Inbound DTO: Create Order Request
+export struct CreateOrderRequestDTO {
+  supplierId: String,
+  currency: String,
+  notes: String,
+  createdBy: String,
+  items: []OrderItemInputDTO
+};
+
+// Inbound DTO: Cancel Order Request
+export struct CancelOrderRequestDTO {
+  reason: String,
+  actor: String
+};
+
+// Inbound DTO: Approve Order Request
+export struct ApproveOrderRequestDTO {
+  approver: String
+};
+
+// Outbound DTO: Single Item in Response
+export struct OrderItemResponseDTO {
+  id: Int,
+  productSku: String,
+  productName: String,
+  quantity: Int,
+  unitPrice: Float,
+  lineTotal: Float
+};
+
+// Outbound DTO: Complete Purchase Order Response
+export struct PurchaseOrderResponseDTO {
+  id: String,
+  orderNumber: String,
+  supplierId: String,
+  status: String,
+  currency: String,
+  subtotal: Float,
+  taxAmount: Float,
+  discountAmount: Float,
+  totalAmount: Float,
+  notes: String,
+  createdBy: String,
+  createdAt: String,
+  updatedAt: String,
+  items: []OrderItemResponseDTO
+};
+
+// Inbound DTO: Create Supplier Request
+export struct CreateSupplierRequestDTO {
+  id: String,
+  name: String,
+  email: String,
+  taxId: String,
+  phone: String,
+  address: String
+};
+
+// Outbound DTO: Supplier Response
+export struct SupplierResponseDTO {
+  id: String,
+  name: String,
+  email: String,
+  taxId: String,
+  phone: String,
+  address: String,
+  createdAt: String
+};
+
+// Mapper: Domain Order -> PurchaseOrderResponseDTO
+export fn ToOrderResponseDTO(order: PurchaseOrder): PurchaseOrderResponseDTO => {
+  let mut mappedItems: []OrderItemResponseDTO = [];
+  for it in order.items {
+    let itemDto: OrderItemResponseDTO = {
+      id: it.id,
+      productSku: it.productSku,
+      productName: it.productName,
+      quantity: it.quantity,
+      unitPrice: it.unitPrice,
+      lineTotal: it.lineTotal
+    };
+    mappedItems = append(mappedItems, itemDto);
+  }
+
+  {
+    id: order.id,
+    orderNumber: order.orderNumber,
+    supplierId: order.supplierId,
+    status: order.status,
+    currency: order.currency,
+    subtotal: order.subtotal,
+    taxAmount: order.taxAmount,
+    discountAmount: order.discountAmount,
+    totalAmount: order.totalAmount,
+    notes: order.notes,
+    createdBy: order.createdBy,
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    items: mappedItems
+  }
+}
+
+// Mapper: Domain Supplier -> SupplierResponseDTO
+export fn ToSupplierResponseDTO(supplier: Supplier): SupplierResponseDTO => {
+  {
+    id: supplier.id,
+    name: supplier.name,
+    email: supplier.email,
+    taxId: supplier.taxId,
+    phone: supplier.phone,
+    address: supplier.address,
+    createdAt: supplier.createdAt
+  }
+}

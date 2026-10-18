@@ -1,0 +1,34 @@
+// ==============================================================================
+// Infrastructure Layer: Notification Service Adapter
+// internal/infrastructure/external/email_notifier.aura - Implements INotificationService
+// ==============================================================================
+
+import { PurchaseOrder } from "../../domain/model/order";
+
+export struct EmailNotifier {
+  sentCount: Int
+};
+
+export fn NewEmailNotifier(): EmailNotifier => {
+  { sentCount: 0 }
+}
+
+fn (n: *EmailNotifier) NotifyOrderCreated(order: PurchaseOrder): Unit => {
+  n.sentCount = n.sentCount + 1;
+  println(`📧 [Notification] New PO Created: #${order.orderNumber} for Supplier: ${order.supplierId} | Total: $${order.totalAmount}`);
+}
+
+fn (n: *EmailNotifier) NotifyOrderApproved(order: PurchaseOrder): Unit => {
+  n.sentCount = n.sentCount + 1;
+  println(`📧 [Notification] PO Approved: #${order.orderNumber} -> Sent confirmation to Supplier: ${order.supplierId}`);
+}
+
+fn (n: *EmailNotifier) NotifyOrderCancelled(order: PurchaseOrder, reason: String): Unit => {
+  n.sentCount = n.sentCount + 1;
+  println(`📧 [Notification] PO Cancelled: #${order.orderNumber}. Reason: ${reason}`);
+}
+
+fn (n: *EmailNotifier) NotifyOrderFulfilled(order: PurchaseOrder): Unit => {
+  n.sentCount = n.sentCount + 1;
+  println(`📧 [Notification] PO Fulfilled: #${order.orderNumber} -> Goods received in warehouse`);
+}

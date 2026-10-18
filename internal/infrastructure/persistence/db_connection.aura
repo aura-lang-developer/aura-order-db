@@ -1,0 +1,28 @@
+// ==============================================================================
+// Infrastructure Layer: PostgreSQL Connection Manager
+// internal/infrastructure/persistence/db_connection.aura - Native PostgreSQL Pool
+// ==============================================================================
+
+import { AppConfig } from "../config/config";
+
+export fn NewPostgresPool(config: AppConfig): PgPool => {
+  let pgConf: PgConfig = {
+    host: config.dbHost,
+    port: config.dbPort,
+    user: config.dbUser,
+    password: config.dbPassword,
+    database: config.dbName,
+    uri: "",
+    connectionLimit: config.dbMaxConns
+  };
+
+  postgres.createPool(pgConf)
+}
+
+export async fn PingDatabase(pool: PgPool): Task<Result<Unit, String>, String> => {
+  let res = await pool.ping();
+  match res {
+    Ok(_) => Ok(()),
+    Err(e) => Err(`Database ping failed: ${e}`)
+  }
+};

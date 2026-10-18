@@ -1,0 +1,389 @@
+// ==============================================================================
+// Infrastructure Layer: PostgreSQL Purchase Order Repository Adapter
+// internal/infrastructure/persistence/postgres_order_repo.aura - Implements IPurchaseOrderRepository
+// ==============================================================================
+
+import { PurchaseOrder, OrderItem } from "../../domain/model/order";
+import { AuraOrm, PostgresOrm } from "github.com/aura-lang-developer/aura-orm/src/orm";
+
+export struct PostgresOrderRepository {
+  __aura_type: String,
+  orderDb: PgPool,
+  orm: AuraOrm
+};
+
+export fn NewPostgresOrderRepository(db: PgPool): PostgresOrderRepository => {
+  {
+    __aura_type: "PostgresOrderRepository",
+    orderDb: db,
+    orm: PostgresOrm()
+  }
+}
+
+// 1. Saves a purchase order and its line items using Aura ORM InsertBuilder
+export async fn (repo: PostgresOrderRepository) Save(order: PurchaseOrder): Task<Result<Unit, String>, String> => {
+  // Insert order header via Aura ORM
+  let qOrder = repo.orm.InsertInto("purchase_orders")
+    .Set("id", order.id)
+    .Set("order_number", order.orderNumber)
+    .Set("supplier_id", order.supplierId)
+    .Set("status", order.status)
+    .Set("currency", order.currency)
+    .Set("subtotal", `${order.subtotal}`)
+    .Set("tax_amount", `${order.taxAmount}`)
+    .Set("discount_amount", `${order.discountAmount}`)
+    .Set("total_amount", `${order.totalAmount}`)
+    .Set("notes", order.notes)
+    .Set("created_by", order.createdBy)
+    .Set("created_at", order.createdAt)
+    .Set("updated_at", order.updatedAt)
+    .ToSql();
+
+  let ordRes = await repo.orderDb.execute(qOrder.sql, qOrder.params);
+
+  match ordRes {
+    Ok(_) => {
+      // Insert all order items via Aura ORM
+      let mut itemError: Option<String> = None;
+      for it in order.items {
+        match itemError {
+          None => {
+            let qItem = repo.orm.InsertInto("purchase_order_items")
+              .Set("order_id", order.id)
+              .Set("product_sku", it.productSku)
+              .Set("product_name", it.productName)
+              .Set("quantity", `${it.quantity}`)
+              .Set("unit_price", `${it.unitPrice}`)
+              .Set("line_total", `${it.lineTotal}`)
+              .ToSql();
+
+            let itRes = await repo.orderDb.execute(qItem.sql, qItem.params);
+            match itRes {
+              Ok(_) => (),
+              Err(e) => {
+                itemError = Some(`Failed to insert order item: ${e}`);
+              }
+            };
+          },
+          Some(_) => ()
+        };
+      }
+
+      match itemError {
+        Some(e) => Err(e),
+        None => Ok(())
+      }
+    },
+    Err(e) => Err(`Failed to insert purchase order in PostgreSQL: ${e}`)
+  }
+};
+
+// 2. Retrieves a purchase order and its items by ID using Aura ORM SelectBuilder
+export async fn (repo: PostgresOrderRepository) FindById(id: String): Task<Option<PurchaseOrder>, String> => {
+  let qOrder = repo.orm.SelectFrom("purchase_orders")
+    .Select("id")
+    .Select("order_number")
+    .Select("supplier_id")
+    .Select("status")
+    .Select("currency")
+    .Select("subtotal")
+    .Select("tax_amount")
+    .Select("discount_amount")
+    .Select("total_amount")
+    .Select("notes")
+    .Select("created_by")
+    .Select("created_at")
+    .Select("updated_at")
+    .Where("id", "=", id)
+    .ToSql();
+
+  let ordRes = await repo.orderDb.query(qOrder.sql, qOrder.params);
+  match ordRes {
+    Ok(rows) => {
+      if len(rows) == 0 {
+        None
+      } else {
+        let r = rows[0];
+
+        // Query items for this order via Aura ORM
+        let qItems = repo.orm.SelectFrom("purchase_order_items")
+          .Select("id")
+          .Select("order_id")
+          .Select("product_sku")
+          .Select("product_name")
+          .Select("quantity")
+          .Select("unit_price")
+          .Select("line_total")
+          .Where("order_id", "=", id)
+          .OrderBy("id", "ASC")
+          .ToSql();
+
+        let mut itemsList: []OrderItem = [];
+        let itemRes = await repo.orderDb.query(qItems.sql, qItems.params);
+        match itemRes {
+          Ok(itemRows) => {
+            for ir in itemRows {
+              let qInt = parseInt(`${ir.quantity}`, 10);
+              let uFloat = parseFloat(`${ir.unit_price}`);
+              let lFloat = parseFloat(`${ir.line_total}`);
+              let idInt = parseInt(`${ir.id}`, 10);
+
+              let oi: OrderItem = {
+                id: idInt,
+                orderId: `${ir.order_id}`,
+                productSku: `${ir.product_sku}`,
+                productName: `${ir.product_name}`,
+                quantity: qInt,
+                unitPrice: uFloat,
+                lineTotal: lFloat
+              };
+              itemsList = append(itemsList, oi);
+            }
+          },
+          Err(_) => ()
+        };
+
+        let subFloat = parseFloat(`${r.subtotal}`);
+        let taxFloat = parseFloat(`${r.tax_amount}`);
+        let discFloat = parseFloat(`${r.discount_amount}`);
+        let totalFloat = parseFloat(`${r.total_amount}`);
+
+        let po: PurchaseOrder = {
+          id: `${r.id}`,
+          orderNumber: `${r.order_number}`,
+          supplierId: `${r.supplier_id}`,
+          status: `${r.status}`,
+          currency: `${r.currency}`,
+          subtotal: subFloat,
+          taxAmount: taxFloat,
+          discountAmount: discFloat,
+          totalAmount: totalFloat,
+          notes: if r.notes != null { `${r.notes}` } else { "" },
+          createdBy: `${r.created_by}`,
+          createdAt: `${r.created_at}`,
+          updatedAt: `${r.updated_at}`,
+          items: itemsList
+        };
+
+        Some(po)
+      }
+    },
+    Err(_) => None
+  }
+};
+
+// 3. Lists all purchase orders using Aura ORM SelectBuilder
+export async fn (repo: PostgresOrderRepository) FindAll(): Task<[]PurchaseOrder, String> => {
+  let qOrders = repo.orm.SelectFrom("purchase_orders")
+    .Select("id")
+    .Select("order_number")
+    .Select("supplier_id")
+    .Select("status")
+    .Select("currency")
+    .Select("subtotal")
+    .Select("tax_amount")
+    .Select("discount_amount")
+    .Select("total_amount")
+    .Select("notes")
+    .Select("created_by")
+    .Select("created_at")
+    .Select("updated_at")
+    .OrderBy("created_at", "DESC")
+    .ToSql();
+
+  let res = await repo.orderDb.query(qOrders.sql, qOrders.params);
+
+  match res {
+    Ok(rows) => {
+      let mut orders: []PurchaseOrder = [];
+      for r in rows {
+        let ordId = `${r.id}`;
+
+        let qItems = repo.orm.SelectFrom("purchase_order_items")
+          .Select("id")
+          .Select("order_id")
+          .Select("product_sku")
+          .Select("product_name")
+          .Select("quantity")
+          .Select("unit_price")
+          .Select("line_total")
+          .Where("order_id", "=", ordId)
+          .OrderBy("id", "ASC")
+          .ToSql();
+
+        let itemRes = await repo.orderDb.query(qItems.sql, qItems.params);
+        let mut itemsList: []OrderItem = [];
+        match itemRes {
+          Ok(itemRows) => {
+            for ir in itemRows {
+              let qInt = parseInt(`${ir.quantity}`, 10);
+              let uFloat = parseFloat(`${ir.unit_price}`);
+              let lFloat = parseFloat(`${ir.line_total}`);
+              let idInt = parseInt(`${ir.id}`, 10);
+
+              let oi: OrderItem = {
+                id: idInt,
+                orderId: `${ir.order_id}`,
+                productSku: `${ir.product_sku}`,
+                productName: `${ir.product_name}`,
+                quantity: qInt,
+                unitPrice: uFloat,
+                lineTotal: lFloat
+              };
+              itemsList = append(itemsList, oi);
+            }
+          },
+          Err(_) => ()
+        };
+
+        let subFloat = parseFloat(`${r.subtotal}`);
+        let taxFloat = parseFloat(`${r.tax_amount}`);
+        let discFloat = parseFloat(`${r.discount_amount}`);
+        let totalFloat = parseFloat(`${r.total_amount}`);
+
+        let po: PurchaseOrder = {
+          id: ordId,
+          orderNumber: `${r.order_number}`,
+          supplierId: `${r.supplier_id}`,
+          status: `${r.status}`,
+          currency: `${r.currency}`,
+          subtotal: subFloat,
+          taxAmount: taxFloat,
+          discountAmount: discFloat,
+          totalAmount: totalFloat,
+          notes: if r.notes != null { `${r.notes}` } else { "" },
+          createdBy: `${r.created_by}`,
+          createdAt: `${r.created_at}`,
+          updatedAt: `${r.updated_at}`,
+          items: itemsList
+        };
+        orders = append(orders, po);
+      }
+      orders
+    },
+    Err(_) => {
+      let empty: []PurchaseOrder = [];
+      empty
+    }
+  }
+};
+
+// 4. Lists purchase orders by specific status using Aura ORM SelectBuilder
+export async fn (repo: PostgresOrderRepository) FindByStatus(status: String): Task<[]PurchaseOrder, String> => {
+  let qOrders = repo.orm.SelectFrom("purchase_orders")
+    .Select("id")
+    .Select("order_number")
+    .Select("supplier_id")
+    .Select("status")
+    .Select("currency")
+    .Select("subtotal")
+    .Select("tax_amount")
+    .Select("discount_amount")
+    .Select("total_amount")
+    .Select("notes")
+    .Select("created_by")
+    .Select("created_at")
+    .Select("updated_at")
+    .Where("status", "=", status)
+    .OrderBy("created_at", "DESC")
+    .ToSql();
+
+  let res = await repo.orderDb.query(qOrders.sql, qOrders.params);
+
+  match res {
+    Ok(rows) => {
+      let mut orders: []PurchaseOrder = [];
+      for r in rows {
+        let ordId = `${r.id}`;
+
+        let qItems = repo.orm.SelectFrom("purchase_order_items")
+          .Select("id")
+          .Select("order_id")
+          .Select("product_sku")
+          .Select("product_name")
+          .Select("quantity")
+          .Select("unit_price")
+          .Select("line_total")
+          .Where("order_id", "=", ordId)
+          .OrderBy("id", "ASC")
+          .ToSql();
+
+        let itemRes = await repo.orderDb.query(qItems.sql, qItems.params);
+        let mut itemsList: []OrderItem = [];
+        match itemRes {
+          Ok(itemRows) => {
+            for ir in itemRows {
+              let qInt = parseInt(`${ir.quantity}`, 10);
+              let uFloat = parseFloat(`${ir.unit_price}`);
+              let lFloat = parseFloat(`${ir.line_total}`);
+              let idInt = parseInt(`${ir.id}`, 10);
+
+              let oi: OrderItem = {
+                id: idInt,
+                orderId: `${ir.order_id}`,
+                productSku: `${ir.product_sku}`,
+                productName: `${ir.product_name}`,
+                quantity: qInt,
+                unitPrice: uFloat,
+                lineTotal: lFloat
+              };
+              itemsList = append(itemsList, oi);
+            }
+          },
+          Err(_) => ()
+        };
+
+        let subFloat = parseFloat(`${r.subtotal}`);
+        let taxFloat = parseFloat(`${r.tax_amount}`);
+        let discFloat = parseFloat(`${r.discount_amount}`);
+        let totalFloat = parseFloat(`${r.total_amount}`);
+
+        let po: PurchaseOrder = {
+          id: ordId,
+          orderNumber: `${r.order_number}`,
+          supplierId: `${r.supplier_id}`,
+          status: `${r.status}`,
+          currency: `${r.currency}`,
+          subtotal: subFloat,
+          taxAmount: taxFloat,
+          discountAmount: discFloat,
+          totalAmount: totalFloat,
+          notes: if r.notes != null { `${r.notes}` } else { "" },
+          createdBy: `${r.created_by}`,
+          createdAt: `${r.created_at}`,
+          updatedAt: `${r.updated_at}`,
+          items: itemsList
+        };
+        orders = append(orders, po);
+      }
+      orders
+    },
+    Err(_) => {
+      let empty: []PurchaseOrder = [];
+      empty
+    }
+  }
+};
+
+// 5. Updates order status and audit metadata using Aura ORM UpdateBuilder
+export async fn (repo: PostgresOrderRepository) Update(order: PurchaseOrder): Task<Result<Unit, String>, String> => {
+  let qUpdate = repo.orm.UpdateTable("purchase_orders")
+    .Set("status", order.status)
+    .Set("notes", order.notes)
+    .Set("updated_at", order.updatedAt)
+    .Where("id", "=", order.id)
+    .ToSql();
+
+  let res = await repo.orderDb.execute(qUpdate.sql, qUpdate.params);
+
+  match res {
+    Ok(info) => {
+      if info.rowCount > 0 {
+        Ok(())
+      } else {
+        Err(`Order '${order.id}' not found for update`)
+      }
+    },
+    Err(e) => Err(`Failed to update order in PostgreSQL: ${e}`)
+  }
+};

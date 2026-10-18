@@ -1,0 +1,231 @@
+// ==============================================================================
+// Presentation Layer: Purchase Order HTTP Handler
+// internal/presentation/http/order_handler.aura - Dispatches HTTP Requests to PurchaseOrderUseCase
+// ==============================================================================
+
+import { GinContext } from "../../../../gin/context";
+import { PurchaseOrderUseCase } from "../../application/services/order_usecase";
+import {
+  CreateOrderRequestDTO,
+  OrderItemInputDTO,
+  ToOrderResponseDTO,
+  PurchaseOrderResponseDTO
+} from "../../application/dto/order_dto";
+
+export struct OrderHttpHandler {
+  useCase: PurchaseOrderUseCase
+};
+
+export fn NewOrderHttpHandler(useCase: PurchaseOrderUseCase): OrderHttpHandler => {
+  { useCase: useCase }
+}
+
+// POST /api/v1/orders - Creates a new purchase order
+export async fn (h: OrderHttpHandler) HandleCreateOrder(c: GinContext): Task<Unit, String> => {
+  let bindRes = c.BindJSON();
+  match bindRes {
+    Ok(body) => {
+      let supplierId = if body.supplierId != null { `${body.supplierId}` } else { "" };
+      let currency = if body.currency != null { `${body.currency}` } else { "USD" };
+      let notes = if body.notes != null { `${body.notes}` } else { "" };
+      let createdBy = if body.createdBy != null { `${body.createdBy}` } else { "procurement_user" };
+
+      let mut itemsList: []OrderItemInputDTO = [];
+      if body.items != null {
+        for rawIt in body.items {
+          if rawIt.productSku != null && rawIt.quantity != null && rawIt.unitPrice != null {
+            let sku = `${rawIt.productSku}`;
+            let name = if rawIt.productName != null { `${rawIt.productName}` } else { sku };
+            let qty = parseInt(`${rawIt.quantity}`, 10);
+            let price = parseFloat(`${rawIt.unitPrice}`);
+
+            let itDto: OrderItemInputDTO = {
+              productSku: sku,
+              productName: name,
+              quantity: qty,
+              unitPrice: price
+            };
+            itemsList = append(itemsList, itDto);
+          }
+        }
+      }
+
+      let reqDto: CreateOrderRequestDTO = {
+        supplierId: supplierId,
+        currency: currency,
+        notes: notes,
+        createdBy: createdBy,
+        items: itemsList
+      };
+
+      let createRes = await h.useCase.CreateOrder(reqDto);
+      match createRes {
+        Ok(order) => {
+          c.JSON(StatusCreated, {
+            status: "success",
+            message: "Purchase order created successfully",
+            data: ToOrderResponseDTO(order)
+          });
+        },
+        Err(err) => {
+          c.JSON(StatusBadRequest, {
+            status: "error",
+            message: err
+          });
+        }
+      }
+    },
+    Err(e) => {
+      c.JSON(StatusBadRequest, {
+        status: "error",
+        message: `Invalid JSON body: ${e}`
+      });
+    }
+  }
+};
+
+// GET /api/v1/orders - List purchase orders (supports ?status=APPROVED)
+export async fn (h: OrderHttpHandler) HandleListOrders(c: GinContext): Task<Unit, String> => {
+  let statusFilter = c.Query("status");
+  let orders = await h.useCase.ListOrders(statusFilter);
+
+  let mut dtos: []PurchaseOrderResponseDTO = [];
+  for ord in orders {
+    dtos = append(dtos, ToOrderResponseDTO(ord));
+  }
+
+  c.JSON(StatusOK, {
+    status: "success",
+    count: len(dtos),
+    filter: if statusFilter != "" { statusFilter } else { "ALL" },
+    data: dtos
+  });
+};
+
+// GET /api/v1/orders/:id - Get purchase order details by ID
+export async fn (h: OrderHttpHandler) HandleGetOrderById(c: GinContext): Task<Unit, String> => {
+  let id = c.Param("id");
+  let res = await h.useCase.GetOrderById(id);
+  match res {
+    Ok(ord) => {
+      c.JSON(StatusOK, {
+        status: "success",
+        data: ToOrderResponseDTO(ord)
+      });
+    },
+    Err(err) => {
+      c.JSON(StatusNotFound, {
+        status: "error",
+        message: err
+      });
+    }
+  }
+};
+
+// POST /api/v1/orders/:id/approve - Approve purchase order
+export async fn (h: OrderHttpHandler) HandleApproveOrder(c: GinContext): Task<Unit, String> => {
+  let id = c.Param("id");
+  let bindRes = c.BindJSON();
+  let mut approver = "procurement_manager";
+  match bindRes {
+    Ok(body) => {
+      if body.approver != null && body.approver != undefined {
+        approver = `${body.approver}`;
+      } else if body.approvedBy != null && body.approvedBy != undefined {
+        approver = `${body.approvedBy}`;
+      }
+    },
+    Err(_) => ()
+  };
+
+  let res = await h.useCase.ApproveOrder(id, approver);
+  match res {
+    Ok(ord) => {
+      c.JSON(StatusOK, {
+        status: "success",
+        message: "Purchase order approved successfully",
+        data: ToOrderResponseDTO(ord)
+      });
+    },
+    Err(err) => {
+      c.JSON(StatusBadRequest, {
+        status: "error",
+        message: err
+      });
+    }
+  }
+};
+
+// POST /api/v1/orders/:id/cancel - Cancel purchase order
+export async fn (h: OrderHttpHandler) HandleCancelOrder(c: GinContext): Task<Unit, String> => {
+  let id = c.Param("id");
+  let bindRes = c.BindJSON();
+  let mut reason = "Cancelled by management";
+  let mut actor = "procurement_admin";
+
+  match bindRes {
+    Ok(body) => {
+      if body.reason != null && body.reason != undefined {
+        reason = `${body.reason}`;
+      }
+      if body.actor != null && body.actor != undefined {
+        actor = `${body.actor}`;
+      } else if body.cancelledBy != null && body.cancelledBy != undefined {
+        actor = `${body.cancelledBy}`;
+      }
+    },
+    Err(_) => ()
+  };
+
+  let res = await h.useCase.CancelOrder(id, actor, reason);
+  match res {
+    Ok(ord) => {
+      c.JSON(StatusOK, {
+        status: "success",
+        message: "Purchase order cancelled successfully",
+        data: ToOrderResponseDTO(ord)
+      });
+    },
+    Err(err) => {
+      c.JSON(StatusBadRequest, {
+        status: "error",
+        message: err
+      });
+    }
+  }
+};
+
+// POST /api/v1/orders/:id/fulfill - Fulfill purchase order
+export async fn (h: OrderHttpHandler) HandleFulfillOrder(c: GinContext): Task<Unit, String> => {
+  let id = c.Param("id");
+  let bindRes = c.BindJSON();
+  let mut actor = "warehouse_receiving";
+
+  match bindRes {
+    Ok(body) => {
+      if body.actor != null && body.actor != undefined {
+        actor = `${body.actor}`;
+      } else if body.receivedBy != null && body.receivedBy != undefined {
+        actor = `${body.receivedBy}`;
+      }
+    },
+    Err(_) => ()
+  };
+
+  let res = await h.useCase.FulfillOrder(id, actor);
+  match res {
+    Ok(ord) => {
+      c.JSON(StatusOK, {
+        status: "success",
+        message: "Purchase order fulfilled successfully (Goods received)",
+        data: ToOrderResponseDTO(ord)
+      });
+    },
+    Err(err) => {
+      c.JSON(StatusBadRequest, {
+        status: "error",
+        message: err
+      });
+    }
+  }
+};

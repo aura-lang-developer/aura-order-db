@@ -1,0 +1,50 @@
+// ==============================================================================
+// Aura ORM - SQL Dialects Module
+// src/dialect/dialect.aura
+// ==============================================================================
+
+export struct Dialect {
+  name: String,
+  placeholderStyle: String, // "numbered" ($1) or "question" (?)
+  quoteChar: String        // `"` for Postgres/SQLite, "`" for MySQL
+};
+
+export fn PostgresDialect(): Dialect => {
+  {
+    name: "postgres",
+    placeholderStyle: "numbered",
+    quoteChar: "\""
+  }
+};
+
+export fn MysqlDialect(): Dialect => {
+  {
+    name: "mysql",
+    placeholderStyle: "question",
+    quoteChar: "`"
+  }
+};
+
+export fn SqliteDialect(): Dialect => {
+  {
+    name: "sqlite",
+    placeholderStyle: "question",
+    quoteChar: "\""
+  }
+};
+
+export fn QuoteIdentifier(dialect: Dialect, identifier: String): String => {
+  if identifier == "*" {
+    "*"
+  } else {
+    `${dialect.quoteChar}${identifier}${dialect.quoteChar}`
+  }
+};
+
+export fn FormatPlaceholder(dialect: Dialect, paramIndex: Int): String => {
+  if dialect.placeholderStyle == "numbered" {
+    `$${paramIndex}`
+  } else {
+    "?"
+  }
+};

@@ -1,0 +1,102 @@
+// ==============================================================================
+// Presentation Layer: Supplier HTTP Handler
+// internal/presentation/http/supplier_handler.aura - Dispatches HTTP Requests to SupplierUseCase
+// ==============================================================================
+
+import { GinContext } from "../../../../gin/context";
+import { SupplierUseCase } from "../../application/services/supplier_usecase";
+import {
+  CreateSupplierRequestDTO,
+  ToSupplierResponseDTO,
+  SupplierResponseDTO
+} from "../../application/dto/order_dto";
+
+export struct SupplierHttpHandler {
+  useCase: SupplierUseCase
+};
+
+export fn NewSupplierHttpHandler(useCase: SupplierUseCase): SupplierHttpHandler => {
+  { useCase: useCase }
+}
+
+// POST /api/v1/suppliers - Register new supplier
+export async fn (h: SupplierHttpHandler) HandleCreateSupplier(c: GinContext): Task<Unit, String> => {
+  let bindRes = c.BindJSON();
+  match bindRes {
+    Ok(body) => {
+      let supId = if body.id != null { `${body.id}` } else { `SUP-${time.now()}` };
+      let name = if body.name != null { `${body.name}` } else { "" };
+      let email = if body.email != null { `${body.email}` } else { "" };
+      let taxId = if body.taxId != null { `${body.taxId}` } else { "" };
+      let phone = if body.phone != null { `${body.phone}` } else { "" };
+      let address = if body.address != null { `${body.address}` } else { "" };
+
+      let reqDto: CreateSupplierRequestDTO = {
+        id: supId,
+        name: name,
+        email: email,
+        taxId: taxId,
+        phone: phone,
+        address: address
+      };
+
+      let createRes = await h.useCase.CreateSupplier(reqDto);
+      match createRes {
+        Ok(sup) => {
+          c.JSON(StatusCreated, {
+            status: "success",
+            message: "Supplier registered successfully",
+            data: ToSupplierResponseDTO(sup)
+          });
+        },
+        Err(err) => {
+          c.JSON(StatusBadRequest, {
+            status: "error",
+            message: err
+          });
+        }
+      }
+    },
+    Err(e) => {
+      c.JSON(StatusBadRequest, {
+        status: "error",
+        message: `Invalid JSON body: ${e}`
+      });
+    }
+  }
+};
+
+// GET /api/v1/suppliers - List all suppliers
+export async fn (h: SupplierHttpHandler) HandleListSuppliers(c: GinContext): Task<Unit, String> => {
+  let list = await h.useCase.ListSuppliers();
+  let mut dtos: []SupplierResponseDTO = [];
+  for s in list {
+    dtos = append(dtos, ToSupplierResponseDTO(s));
+  }
+
+  c.JSON(StatusOK, {
+    status: "success",
+    count: len(dtos),
+    data: dtos
+  });
+};
+
+// GET /api/v1/suppliers/:id - Get supplier by ID
+export async fn (h: SupplierHttpHandler) HandleGetSupplierById(c: GinContext): Task<Unit, String> => {
+  let id = c.Param("id");
+  let res = await h.useCase.GetSupplierById(id);
+  match res {
+    Ok(sup) => {
+      c.JSON(StatusOK, {
+        status: "success",
+        data: ToSupplierResponseDTO(sup)
+      });
+    },
+    Err(err) => {
+      c.JSON(StatusNotFound, {
+        status: "error",
+        message: err
+      });
+    }
+  }
+};

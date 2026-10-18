@@ -1,0 +1,42 @@
+// ==============================================================================
+// Application Layer: Port Interfaces (Dependency Inversion Principle)
+// internal/application/interfaces/ports.aura - Contracts Defined by Business Use Cases
+// ==============================================================================
+
+import { PurchaseOrder } from "../../domain/model/order";
+import { Supplier } from "../../domain/model/supplier";
+import { DomainEvent } from "../../domain/events";
+
+// Outbound Port: Purchase Order Persistence Repository Contract
+export interface IPurchaseOrderRepository {
+  Save(order: PurchaseOrder): Task<Result<Unit, String>, String>;
+  FindById(id: String): Task<Option<PurchaseOrder>, String>;
+  FindAll(): Task<[]PurchaseOrder, String>;
+  FindByStatus(status: String): Task<[]PurchaseOrder, String>;
+  Update(order: PurchaseOrder): Task<Result<Unit, String>, String>;
+}
+
+// Outbound Port: Supplier Persistence Repository Contract
+export interface ISupplierRepository {
+  Save(supplier: Supplier): Task<Result<Unit, String>, String>;
+  FindById(id: String): Task<Option<Supplier>, String>;
+  FindAll(): Task<[]Supplier, String>;
+}
+
+// Outbound Port: Notification Service Contract
+export interface INotificationService {
+  NotifyOrderCreated(order: PurchaseOrder): Unit;
+  NotifyOrderApproved(order: PurchaseOrder): Unit;
+  NotifyOrderCancelled(order: PurchaseOrder, reason: String): Unit;
+  NotifyOrderFulfilled(order: PurchaseOrder): Unit;
+}
+
+// Outbound Port: Domain Event Publisher Contract
+export interface IEventPublisher {
+  Publish(event: DomainEvent): Unit;
+}
+
+// Outbound Port: Audit Trail Contract
+export interface IAuditService {
+  LogAudit(action: String, entityType: String, entityId: String, actor: String, details: String): Task<Unit, String>;
+}

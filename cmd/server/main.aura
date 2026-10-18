@@ -1,0 +1,102 @@
+// ==============================================================================
+// Onion Architecture Composition Root & Server Entrypoint
+// cmd/server/main.aura - Bootstraps Dependency Injection & Starts HTTP Server
+// ==============================================================================
+
+import { LoadConfig } from "../../internal/infrastructure/config/config";
+import { NewPostgresPool, PingDatabase } from "../../internal/infrastructure/persistence/db_connection";
+import { RunMigrations } from "../../internal/infrastructure/persistence/db_migrator";
+import { NewPostgresOrderRepository } from "../../internal/infrastructure/persistence/postgres_order_repo";
+import { NewPostgresSupplierRepository } from "../../internal/infrastructure/persistence/postgres_supplier_repo";
+import { NewCSPEventBus } from "../../internal/infrastructure/messaging/csp_event_bus";
+import { NewEmailNotifier } from "../../internal/infrastructure/external/email_notifier";
+import { NewPostgresAuditAdapter } from "../../internal/infrastructure/external/audit_adapter";
+import { NewPricingCalculator } from "../../internal/domain/service/pricing_calculator";
+import { NewPurchaseOrderUseCase } from "../../internal/application/services/order_usecase";
+import { NewSupplierUseCase } from "../../internal/application/services/supplier_usecase";
+import { NewOrderHttpHandler } from "../../internal/presentation/http/order_handler";
+import { NewSupplierHttpHandler } from "../../internal/presentation/http/supplier_handler";
+import { NewHealthHttpHandler } from "../../internal/presentation/http/health_handler";
+import { SetupRouter } from "../../internal/presentation/http/router";
+
+async fn bootstrap(): Task<Unit, String> => {
+  println("==================================================================");
+  println("  🧅 AURA PURCHASE ORDERS MICROSERVICE (ONION ARCHITECTURE)      ");
+  println("==================================================================");
+
+  // 1. Load Application Configuration
+  let config = LoadConfig();
+  println(`[Config] Service: ${config.serviceName} | Env: ${config.environment}`);
+  println(`[Config] Target DB: postgresql://${config.dbUser}:****@${config.dbHost}:${config.dbPort}/${config.dbName}`);
+
+  // 2. Instantiate Infrastructure: PostgreSQL Connection Pool
+  println("\n>> [1/5] Connecting to PostgreSQL database server...");
+  let db = NewPostgresPool(config);
+
+  let pingRes = await PingDatabase(db);
+  match pingRes {
+    Ok(_) => {
+      println("✓ Successfully connected to PostgreSQL.");
+    },
+    Err(e) => {
+      println(`⚠️ Warning during database ping: ${e}`);
+    }
+  };
+
+  // 3. Run Automated Database Migrations & Seed Default Data
+  println("\n>> [2/5] Running schema migrations & seeders...");
+  let migRes = await RunMigrations(db);
+  match migRes {
+    Ok(_) => {
+      println("✓ Database schema verified.");
+    },
+    Err(e) => {
+      println(`✕ Migration error: ${e}`);
+    }
+  };
+
+  // 4. Instantiate Infrastructure Adapters (Outer Ring)
+  println("\n>> [3/5] Instantiating infrastructure adapters...");
+  let orderRepo = NewPostgresOrderRepository(db);
+  let supplierRepo = NewPostgresSupplierRepository(db);
+  let mut eventBus = NewCSPEventBus();
+  let mut notifier = NewEmailNotifier();
+  let auditAdapter = NewPostgresAuditAdapter(db);
+
+  let _ = await auditAdapter.LogAudit("SERVER_INIT", "Microservice", "system", "bootstrap", "Bootstrapping Onion Composition Root");
+
+  // 5. Instantiate Domain Services (Core Layer)
+  println("\n>> [4/5] Initializing domain services & business rules...");
+  let pricingCalc = NewPricingCalculator(config.taxRate, config.volumeDiscountThreshold, config.volumeDiscountRate);
+
+  // 6. Instantiate Application Layer (Use Cases with Injected Dependencies)
+  let supplierUseCase = NewSupplierUseCase(supplierRepo, auditAdapter);
+  let orderUseCase = NewPurchaseOrderUseCase(
+    orderRepo,
+    supplierRepo,
+    pricingCalc,
+    &notifier,
+    &eventBus,
+    auditAdapter
+  );
+
+  // 7. Instantiate Presentation Layer (HTTP Handlers & Router)
+  println("\n>> [5/5] Configuring Gin HTTP Router and REST endpoints...");
+  let orderHandler = NewOrderHttpHandler(orderUseCase);
+  let supplierHandler = NewSupplierHttpHandler(supplierUseCase);
+  let healthHandler = NewHealthHttpHandler(config, db);
+
+  let router = SetupRouter(
+    orderHandler,
+    supplierHandler,
+    healthHandler,
+    config
+  );
+
+  // 8. Start HTTP Server
+  println(`\n🚀 Purchase Orders Microservice listening on http://localhost${config.port}`);
+  println("   Press Ctrl+C to terminate.\n");
+  router.Run(config.port);
+};
+
+bootstrap()

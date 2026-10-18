@@ -1,0 +1,303 @@
+// ==============================================================================
+// Test Suite: Application Layer Use Cases
+// tests/usecase_test.aura - Tests Business Orchestration Across Ports
+// ==============================================================================
+
+import { PurchaseOrder, OrderItem, StatusPendingApproval, StatusApproved, StatusCancelled, StatusFulfilled } from "../internal/domain/model/order";
+import { Supplier, NewSupplier } from "../internal/domain/model/supplier";
+import { PricingCalculator, NewPricingCalculator } from "../internal/domain/service/pricing_calculator";
+import { DomainEvent } from "../internal/domain/events";
+import { CreateOrderRequestDTO, OrderItemInputDTO, CreateSupplierRequestDTO } from "../internal/application/dto/order_dto";
+import { PurchaseOrderUseCase, NewPurchaseOrderUseCase } from "../internal/application/services/order_usecase";
+import { SupplierUseCase, NewSupplierUseCase } from "../internal/application/services/supplier_usecase";
+import { IPurchaseOrderRepository, ISupplierRepository, INotificationService, IEventPublisher, IAuditService } from "../internal/application/interfaces/ports";
+
+// In-Memory Test Repositories with __aura_type runtime discriminator
+struct MockOrderRepository {
+  __aura_type: String,
+  orderStore: []PurchaseOrder
+};
+
+fn NewMockOrderRepository(): MockOrderRepository => {
+  let empty: []PurchaseOrder = [];
+  { __aura_type: "MockOrderRepository", orderStore: empty }
+}
+
+async fn (repo: MockOrderRepository) Save(order: PurchaseOrder): Task<Result<Unit, String>, String> => {
+  repo.orderStore = append(repo.orderStore, order);
+  Ok(())
+};
+
+async fn (repo: MockOrderRepository) FindById(id: String): Task<Option<PurchaseOrder>, String> => {
+  for ord in repo.orderStore {
+    if ord.id == id {
+      return Some(ord);
+    }
+  }
+  None
+};
+
+async fn (repo: MockOrderRepository) FindAll(): Task<[]PurchaseOrder, String> => {
+  repo.orderStore
+};
+
+async fn (repo: MockOrderRepository) FindByStatus(status: String): Task<[]PurchaseOrder, String> => {
+  let mut filtered: []PurchaseOrder = [];
+  for ord in repo.orderStore {
+    if ord.status == status {
+      filtered = append(filtered, ord);
+    }
+  }
+  filtered
+};
+
+async fn (repo: MockOrderRepository) Update(order: PurchaseOrder): Task<Result<Unit, String>, String> => {
+  let mut foundIdx = -1;
+  for i, ord in repo.orderStore {
+    if ord.id == order.id {
+      foundIdx = i;
+      break;
+    }
+  }
+  if foundIdx >= 0 {
+    repo.orderStore[foundIdx] = order;
+    Ok(())
+  } else {
+    Err(`Order ${order.id} not found`)
+  }
+};
+
+struct MockSupplierRepository {
+  __aura_type: String,
+  supplierStore: []Supplier
+};
+
+fn NewMockSupplierRepository(): MockSupplierRepository => {
+  let empty: []Supplier = [];
+  { __aura_type: "MockSupplierRepository", supplierStore: empty }
+}
+
+async fn (repo: MockSupplierRepository) Save(supplier: Supplier): Task<Result<Unit, String>, String> => {
+  repo.supplierStore = append(repo.supplierStore, supplier);
+  Ok(())
+};
+
+async fn (repo: MockSupplierRepository) FindById(id: String): Task<Option<Supplier>, String> => {
+  for sup in repo.supplierStore {
+    if sup.id == id {
+      return Some(sup);
+    }
+  }
+  None
+};
+
+async fn (repo: MockSupplierRepository) FindAll(): Task<[]Supplier, String> => {
+  repo.supplierStore
+};
+
+struct MockNotifier {
+  notifications: []String
+};
+
+fn (n: *MockNotifier) NotifyOrderCreated(order: PurchaseOrder): Unit => {
+  n.notifications = append(n.notifications, `CREATED:${order.id}`);
+}
+
+fn (n: *MockNotifier) NotifyOrderApproved(order: PurchaseOrder): Unit => {
+  n.notifications = append(n.notifications, `APPROVED:${order.id}`);
+}
+
+fn (n: *MockNotifier) NotifyOrderCancelled(order: PurchaseOrder, reason: String): Unit => {
+  n.notifications = append(n.notifications, `CANCELLED:${order.id}:${reason}`);
+}
+
+fn (n: *MockNotifier) NotifyOrderFulfilled(order: PurchaseOrder): Unit => {
+  n.notifications = append(n.notifications, `FULFILLED:${order.id}`);
+}
+
+struct MockEventBus {
+  events: []DomainEvent
+};
+
+fn (bus: *MockEventBus) Publish(event: DomainEvent): Unit => {
+  bus.events = append(bus.events, event);
+}
+
+struct MockAuditAdapter {
+  auditLogs: []String
+};
+
+async fn (aud: MockAuditAdapter) LogAudit(action: String, entityType: String, entityId: String, actor: String, details: String): Task<Unit, String> => {
+  aud.auditLogs = append(aud.auditLogs, `${action}:${entityType}:${entityId}`);
+  ();
+};
+
+export async fn runUseCaseTests(): Task<Unit, String> => {
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧪 APPLICATION LAYER USE CASE TESTS (ONION ARCHITECTURE)");
+  println("================================================================================");
+
+  let orderRepo = NewMockOrderRepository();
+  let supplierRepo = NewMockSupplierRepository();
+  let mut notifier: MockNotifier = { notifications: [] };
+  let mut eventBus: MockEventBus = { events: [] };
+  let auditAdapter: MockAuditAdapter = { auditLogs: [] };
+  let pricingCalc = NewPricingCalculator(0.19, 5000.0, 0.05);
+
+  let supplierUseCase = NewSupplierUseCase(supplierRepo, auditAdapter);
+  let orderUseCase = NewPurchaseOrderUseCase(
+    orderRepo,
+    supplierRepo,
+    pricingCalc,
+    &notifier,
+    &eventBus,
+    auditAdapter
+  );
+
+  // 1. Create Supplier via UseCase
+  println("\n[USE CASE 1] Register Supplier:");
+  let supReq: CreateSupplierRequestDTO = {
+    id: "SUP-TEST-1",
+    name: "Tech Parts International",
+    email: "procurement@techparts.com",
+    taxId: "TAX-990011",
+    phone: "+1-555-4040",
+    address: "9900 Industrial Parkway"
+  };
+  let supRes = await supplierUseCase.CreateSupplier(supReq);
+  match supRes {
+    Ok(s) => {
+      if s.id == "SUP-TEST-1" {
+        println("  ✓ PASS: Supplier created through SupplierUseCase");
+        passed += 1;
+      } else {
+        println("  ✕ FAIL: Supplier ID mismatch");
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Unexpected supplier error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 2. Create Purchase Order with Items & Pricing calculation
+  println("\n[USE CASE 2] Create Purchase Order with Pricing & Tax:");
+  let mut itemsInput: []OrderItemInputDTO = [
+    { productSku: "SKU-SERVO-01", productName: "Industrial Servo Motor", quantity: 4, unitPrice: 500.0 }
+  ];
+  let orderReq: CreateOrderRequestDTO = {
+    supplierId: "SUP-TEST-1",
+    currency: "USD",
+    notes: "High priority line replacement",
+    createdBy: "engineer_1",
+    items: itemsInput
+  };
+
+  let createRes = await orderUseCase.CreateOrder(orderReq);
+  let mut createdOrderId = "";
+  match createRes {
+    Ok(po) => {
+      createdOrderId = po.id;
+      // 4 * 500 = 2000 subtotal, tax 19% = 380, total = 2380
+      if po.subtotal == 2000.0 && po.taxAmount == 380.0 && po.totalAmount == 2380.0 {
+        println(`  ✓ PASS: Order created with accurate pricing: Total $${po.totalAmount} (ID: ${po.id})`);
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Pricing calculation mismatch: Total was ${po.totalAmount}`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Order creation error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 3. Reject Order Creation for Non-Existent Supplier
+  println("\n[USE CASE 3] Enforce Supplier Existence Rule:");
+  let invalidReq: CreateOrderRequestDTO = {
+    supplierId: "SUP-DOES-NOT-EXIST",
+    currency: "USD",
+    notes: "Should fail",
+    createdBy: "admin",
+    items: itemsInput
+  };
+  let invRes = await orderUseCase.CreateOrder(invalidReq);
+  match invRes {
+    Ok(_) => {
+      println("  ✕ FAIL: Order should not be created for non-existent supplier");
+      failed += 1;
+    },
+    Err(e) => {
+      println(`  ✓ PASS: Successfully blocked invalid supplier -> ${e}`);
+      passed += 1;
+    }
+  };
+
+  // 4. Query Order by ID
+  println("\n[USE CASE 4] Get Order by ID:");
+  let getRes = await orderUseCase.GetOrderById(createdOrderId);
+  match getRes {
+    Ok(ord) => {
+      if ord.id == createdOrderId && len(ord.items) == 1 {
+        println("  ✓ PASS: Order retrieved with line items");
+        passed += 1;
+      } else {
+        println("  ✕ FAIL: Order retrieval mismatch");
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: GetOrderById error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 5. Approve Purchase Order
+  println("\n[USE CASE 5] Approve Purchase Order:");
+  let appRes = await orderUseCase.ApproveOrder(createdOrderId, "vp_operations");
+  match appRes {
+    Ok(ord) => {
+      if ord.status == StatusApproved() {
+        println("  ✓ PASS: Order approved successfully");
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Status not updated to APPROVED, got ${ord.status}`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Approve error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 6. Fulfill Purchase Order
+  println("\n[USE CASE 6] Fulfill Purchase Order (Goods Reception):");
+  let fulRes = await orderUseCase.FulfillOrder(createdOrderId, "warehouse_manager");
+  match fulRes {
+    Ok(ord) => {
+      if ord.status == StatusFulfilled() {
+        println("  ✓ PASS: Order fulfilled and received");
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Status not updated to FULFILLED`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Fulfill error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  println("--------------------------------------------------------------------------------");
+  println(`  📊 SUMMARY: ${passed} PASSED | ${failed} FAILED`);
+  println("================================================================================");
+};
+
+runUseCaseTests()

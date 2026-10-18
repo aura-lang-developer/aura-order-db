@@ -1,0 +1,291 @@
+// ==============================================================================
+// Application Layer: Purchase Order Use Case Service
+// internal/application/services/order_usecase.aura - Coordinates Domain & Ports
+// ==============================================================================
+
+import {
+  PurchaseOrder,
+  OrderItem,
+  NewPurchaseOrder,
+  NewOrderItem
+} from "../../domain/model/order";
+import { PricingCalculator } from "../../domain/service/pricing_calculator";
+import {
+  ErrEmptyOrderItems,
+  FormatOrderNotFound,
+  FormatSupplierNotFound
+} from "../../domain/errors";
+import {
+  NewDomainEvent,
+  EventOrderCreated,
+  EventOrderApproved,
+  EventOrderCancelled,
+  EventOrderFulfilled
+} from "../../domain/events";
+import { CreateOrderRequestDTO } from "../dto/order_dto";
+import {
+  IPurchaseOrderRepository,
+  ISupplierRepository,
+  INotificationService,
+  IEventPublisher,
+  IAuditService
+} from "../interfaces/ports";
+
+export struct PurchaseOrderUseCase {
+  orderRepo: IPurchaseOrderRepository,
+  supplierRepo: ISupplierRepository,
+  pricingCalc: PricingCalculator,
+  notifier: INotificationService,
+  eventBus: IEventPublisher,
+  auditService: IAuditService
+};
+
+export fn NewPurchaseOrderUseCase(
+  orderRepo: IPurchaseOrderRepository,
+  supplierRepo: ISupplierRepository,
+  pricingCalc: PricingCalculator,
+  notifier: INotificationService,
+  eventBus: IEventPublisher,
+  auditService: IAuditService
+): PurchaseOrderUseCase => {
+  {
+    orderRepo: orderRepo,
+    supplierRepo: supplierRepo,
+    pricingCalc: pricingCalc,
+    notifier: notifier,
+    eventBus: eventBus,
+    auditService: auditService
+  }
+}
+
+let mut orderCounter: Int = 1000;
+
+// 1. Create Purchase Order Use Case
+export async fn (uc: PurchaseOrderUseCase) CreateOrder(req: CreateOrderRequestDTO): Task<Result<PurchaseOrder, String>, String> => {
+  if len(req.items) == 0 {
+    return Err(ErrEmptyOrderItems());
+  }
+
+  // Verify supplier exists
+  let supOpt = await uc.supplierRepo.FindById(req.supplierId);
+  match supOpt {
+    None => Err(FormatSupplierNotFound(req.supplierId)),
+    Some(_) => {
+      orderCounter += 1;
+      let orderId = `PO-${time.now()}-${orderCounter}`;
+      let orderNumber = `OC-${time.now() % 100000000}-${orderCounter}`;
+
+      let mut itemsList: []OrderItem = [];
+      let mut subtotal: Float = 0.0;
+      let mut itemError: Option<String> = None;
+
+      for itReq in req.items {
+        match itemError {
+          None => {
+            let itemRes = NewOrderItem(
+              orderId,
+              itReq.productSku,
+              itReq.productName,
+              itReq.quantity,
+              itReq.unitPrice
+            );
+
+            match itemRes {
+              Ok(item) => {
+                subtotal = subtotal + item.lineTotal;
+                itemsList = append(itemsList, item);
+                ();
+              },
+              Err(err) => {
+                itemError = Some(err);
+                ();
+              }
+            };
+          },
+          Some(_) => {
+            ();
+          }
+        };
+      }
+
+      match itemError {
+        Some(err) => Err(err),
+        None => {
+          // Calculate pricing, taxes, and volume discounts via Domain Service
+          let pricing = uc.pricingCalc.CalculateTotals(subtotal);
+
+          let poRes = NewPurchaseOrder(
+            orderId,
+            orderNumber,
+            req.supplierId,
+            req.currency,
+            req.notes,
+            req.createdBy,
+            itemsList,
+            pricing.subtotal,
+            pricing.taxAmount,
+            pricing.discountAmount,
+            pricing.totalAmount
+          );
+
+          match poRes {
+            Ok(po) => {
+              let saveRes = await uc.orderRepo.Save(po);
+              match saveRes {
+                Ok(_) => {
+                  // Outbound side effects: Notify, Event, Audit
+                  uc.notifier.NotifyOrderCreated(po);
+                  let evtPayload: Any = {
+                    orderNumber: po.orderNumber,
+                    supplierId: po.supplierId,
+                    totalAmount: po.totalAmount
+                  };
+                  uc.eventBus.Publish(NewDomainEvent(EventOrderCreated(), po.id, evtPayload));
+
+                  let _ = await uc.auditService.LogAudit(
+                    "CREATE",
+                    "PurchaseOrder",
+                    po.id,
+                    po.createdBy,
+                    `Created Order ${po.orderNumber} for Supplier ${po.supplierId}. Total: $${po.totalAmount}`
+                  );
+
+                  Ok(po)
+                },
+                Err(err) => Err(err)
+              }
+            },
+            Err(err) => Err(err)
+          }
+        }
+      }
+    }
+  }
+};
+
+// 2. Query Purchase Order by ID
+export async fn (uc: PurchaseOrderUseCase) GetOrderById(id: String): Task<Result<PurchaseOrder, String>, String> => {
+  let opt = await uc.orderRepo.FindById(id);
+  match opt {
+    Some(po) => Ok(po),
+    None => Err(FormatOrderNotFound(id))
+  }
+};
+
+// 3. List Purchase Orders with Optional Status Filter
+export async fn (uc: PurchaseOrderUseCase) ListOrders(statusFilter: String): Task<[]PurchaseOrder, String> => {
+  let list = if statusFilter != "" && statusFilter != "ALL" {
+    await uc.orderRepo.FindByStatus(statusFilter)
+  } else {
+    await uc.orderRepo.FindAll()
+  };
+  list
+};
+
+// 4. Approve Purchase Order
+export async fn (uc: PurchaseOrderUseCase) ApproveOrder(id: String, approver: String): Task<Result<PurchaseOrder, String>, String> => {
+  let opt = await uc.orderRepo.FindById(id);
+  match opt {
+    None => Err(FormatOrderNotFound(id)),
+    Some(existing) => {
+      let mut po = existing;
+      let appRes = po.Approve();
+      match appRes {
+        Ok(_) => {
+          let updRes = await uc.orderRepo.Update(po);
+          match updRes {
+            Ok(_) => {
+              uc.notifier.NotifyOrderApproved(po);
+              let evtPayload: Any = { orderNumber: po.orderNumber, approver: approver };
+              uc.eventBus.Publish(NewDomainEvent(EventOrderApproved(), po.id, evtPayload));
+
+              let _ = await uc.auditService.LogAudit(
+                "APPROVE",
+                "PurchaseOrder",
+                po.id,
+                approver,
+                `Approved Order ${po.orderNumber}`
+              );
+
+              Ok(po)
+            },
+            Err(e) => Err(e)
+          }
+        },
+        Err(e) => Err(e)
+      }
+    }
+  }
+};
+
+// 5. Cancel Purchase Order
+export async fn (uc: PurchaseOrderUseCase) CancelOrder(id: String, actor: String, reason: String): Task<Result<PurchaseOrder, String>, String> => {
+  let opt = await uc.orderRepo.FindById(id);
+  match opt {
+    None => Err(FormatOrderNotFound(id)),
+    Some(existing) => {
+      let mut po = existing;
+      let canRes = po.Cancel(reason);
+      match canRes {
+        Ok(_) => {
+          let updRes = await uc.orderRepo.Update(po);
+          match updRes {
+            Ok(_) => {
+              uc.notifier.NotifyOrderCancelled(po, reason);
+              let evtPayload: Any = { orderNumber: po.orderNumber, reason: reason, cancelledBy: actor };
+              uc.eventBus.Publish(NewDomainEvent(EventOrderCancelled(), po.id, evtPayload));
+
+              let _ = await uc.auditService.LogAudit(
+                "CANCEL",
+                "PurchaseOrder",
+                po.id,
+                actor,
+                `Cancelled Order ${po.orderNumber}. Reason: ${reason}`
+              );
+
+              Ok(po)
+            },
+            Err(e) => Err(e)
+          }
+        },
+        Err(e) => Err(e)
+      }
+    }
+  }
+};
+
+// 6. Fulfill Purchase Order
+export async fn (uc: PurchaseOrderUseCase) FulfillOrder(id: String, actor: String): Task<Result<PurchaseOrder, String>, String> => {
+  let opt = await uc.orderRepo.FindById(id);
+  match opt {
+    None => Err(FormatOrderNotFound(id)),
+    Some(existing) => {
+      let mut po = existing;
+      let fulRes = po.Fulfill();
+      match fulRes {
+        Ok(_) => {
+          let updRes = await uc.orderRepo.Update(po);
+          match updRes {
+            Ok(_) => {
+              uc.notifier.NotifyOrderFulfilled(po);
+              let evtPayload: Any = { orderNumber: po.orderNumber, fulfilledBy: actor };
+              uc.eventBus.Publish(NewDomainEvent(EventOrderFulfilled(), po.id, evtPayload));
+
+              let _ = await uc.auditService.LogAudit(
+                "FULFILL",
+                "PurchaseOrder",
+                po.id,
+                actor,
+                `Fulfilled Order ${po.orderNumber} (Goods received)`
+              );
+
+              Ok(po)
+            },
+            Err(e) => Err(e)
+          }
+        },
+        Err(e) => Err(e)
+      }
+    }
+  }
+};

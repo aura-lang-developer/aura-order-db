@@ -1,0 +1,84 @@
+// ==============================================================================
+// Aura ORM - Main Entrypoint & Facade
+// src/orm.aura - High-Level Unified ORM & Query Builder Interface
+// ==============================================================================
+
+import {
+  Dialect,
+  PostgresDialect,
+  MysqlDialect,
+  SqliteDialect,
+  QuoteIdentifier,
+  FormatPlaceholder
+} from "./dialect/dialect";
+
+import {
+  SqlQuery,
+  SelectBuilder,
+  InsertBuilder,
+  UpdateBuilder,
+  DeleteBuilder,
+  NewSelect,
+  NewInsert,
+  NewUpdate,
+  NewDelete
+} from "./builder/query";
+
+import {
+  ColumnDef,
+  TableSchema,
+  NewTable,
+  IntegerColumn,
+  BigIntColumn,
+  StringColumn,
+  TextColumn,
+  BoolColumn,
+  NumericColumn,
+  TimestampColumn
+} from "./schema/schema";
+
+export struct AuraOrm {
+  __aura_type: String,
+  dialect: Dialect
+};
+
+export fn NewOrm(dialect: Dialect): AuraOrm => {
+  {
+    __aura_type: "AuraOrm",
+    dialect: dialect
+  }
+};
+
+export fn PostgresOrm(): AuraOrm => {
+  NewOrm(PostgresDialect())
+};
+
+export fn MysqlOrm(): AuraOrm => {
+  NewOrm(MysqlDialect())
+};
+
+export fn SqliteOrm(): AuraOrm => {
+  NewOrm(SqliteDialect())
+};
+
+// --- ORM Methods ---
+
+export fn (orm: AuraOrm) SelectFrom(table: String): SelectBuilder => {
+  NewSelect(table, orm.dialect)
+};
+
+export fn (orm: AuraOrm) InsertInto(table: String): InsertBuilder => {
+  NewInsert(table, orm.dialect)
+};
+
+export fn (orm: AuraOrm) UpdateTable(table: String): UpdateBuilder => {
+  NewUpdate(table, orm.dialect)
+};
+
+export fn (orm: AuraOrm) DeleteFrom(table: String): DeleteBuilder => {
+  NewDelete(table, orm.dialect)
+};
+
+export fn (orm: AuraOrm) DefineTable(name: String): TableSchema => {
+  NewTable(name)
+};

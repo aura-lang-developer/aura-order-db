@@ -1,0 +1,38 @@
+// ==============================================================================
+// Infrastructure Layer: Application Configuration
+// internal/infrastructure/config/config.aura - Environment & Database Settings
+// ==============================================================================
+
+export struct AppConfig {
+  serviceName: String,
+  version: String,
+  port: String,
+  environment: String,
+  dbHost: String,
+  dbPort: Int,
+  dbUser: String,
+  dbPassword: String,
+  dbName: String,
+  dbMaxConns: Int,
+  taxRate: Float,
+  volumeDiscountThreshold: Float,
+  volumeDiscountRate: Float
+};
+
+export fn LoadConfig(): AppConfig => {
+  {
+    serviceName: "Aura Purchase Orders Microservice (Onion Architecture)",
+    version: "v1.0.0",
+    port: ":8085",
+    environment: "production",
+    dbHost: "127.0.0.1",
+    dbPort: 5432,
+    dbUser: "admin",
+    dbPassword: "secret",
+    dbName: "orders_db",
+    dbMaxConns: 10,
+    taxRate: 0.19,                   // 19% IVA / VAT
+    volumeDiscountThreshold: 5000.0, // Orders over $5,000 get discount
+    volumeDiscountRate: 0.05         // 5% Volume Discount
+  }
+}

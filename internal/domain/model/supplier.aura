@@ -1,0 +1,41 @@
+// ==============================================================================
+// Domain Layer: Supplier Aggregate
+// internal/domain/model/supplier.aura - Business Entity for Vendors & Suppliers
+// ==============================================================================
+
+import { ErrInvalidSupplierData } from "../errors";
+
+export struct Supplier {
+  id: String,
+  name: String,
+  email: String,
+  taxId: String,
+  phone: String,
+  address: String,
+  createdAt: String
+};
+
+export fn NewSupplier(
+  id: String,
+  name: String,
+  email: String,
+  taxId: String,
+  phone: String,
+  address: String
+): Result<Supplier, String> => {
+  if name == "" || email == "" || taxId == "" {
+    return Err(ErrInvalidSupplierData());
+  }
+
+  let sup: Supplier = {
+    id: id,
+    name: name,
+    email: email,
+    taxId: taxId,
+    phone: phone,
+    address: address,
+    createdAt: time.isoString()
+  };
+
+  Ok(sup)
+}

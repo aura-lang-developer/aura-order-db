@@ -1,0 +1,124 @@
+// ==============================================================================
+// Infrastructure Layer: PostgreSQL Supplier Repository Adapter
+// internal/infrastructure/persistence/postgres_supplier_repo.aura - Implements ISupplierRepository
+// ==============================================================================
+
+import { Supplier } from "../../domain/model/supplier";
+import { AuraOrm, PostgresOrm } from "github.com/aura-lang-developer/aura-orm/src/orm";
+
+export struct PostgresSupplierRepository {
+  __aura_type: String,
+  supplierDb: PgPool,
+  orm: AuraOrm
+};
+
+export fn NewPostgresSupplierRepository(db: PgPool): PostgresSupplierRepository => {
+  {
+    __aura_type: "PostgresSupplierRepository",
+    supplierDb: db,
+    orm: PostgresOrm()
+  }
+}
+
+// Persists a new supplier using Aura ORM InsertBuilder
+export async fn (repo: PostgresSupplierRepository) Save(supplier: Supplier): Task<Result<Unit, String>, String> => {
+  let insertQuery = repo.orm.InsertInto("suppliers")
+    .Set("id", supplier.id)
+    .Set("name", supplier.name)
+    .Set("email", supplier.email)
+    .Set("tax_id", supplier.taxId)
+    .Set("phone", supplier.phone)
+    .Set("address", supplier.address)
+    .SetRaw("created_at", "CURRENT_TIMESTAMP")
+    .OnConflictDoUpdate("id", [
+      "name = EXCLUDED.name",
+      "email = EXCLUDED.email",
+      "tax_id = EXCLUDED.tax_id",
+      "phone = EXCLUDED.phone",
+      "address = EXCLUDED.address"
+    ])
+    .ToSql();
+
+  let res = await repo.supplierDb.execute(insertQuery.sql, insertQuery.params);
+
+  match res {
+    Ok(_) => Ok(()),
+    Err(e) => Err(`Failed to save supplier in PostgreSQL: ${e}`)
+  }
+};
+
+// Finds a supplier by identifier using Aura ORM SelectBuilder
+export async fn (repo: PostgresSupplierRepository) FindById(id: String): Task<Option<Supplier>, String> => {
+  let query = repo.orm.SelectFrom("suppliers")
+    .Select("id")
+    .Select("name")
+    .Select("email")
+    .Select("tax_id")
+    .Select("phone")
+    .Select("address")
+    .Select("created_at")
+    .Where("id", "=", id)
+    .ToSql();
+
+  let res = await repo.supplierDb.query(query.sql, query.params);
+
+  match res {
+    Ok(rows) => {
+      if len(rows) > 0 {
+        let r = rows[0];
+        let sup: Supplier = {
+          id: `${r.id}`,
+          name: `${r.name}`,
+          email: `${r.email}`,
+          taxId: `${r.tax_id}`,
+          phone: if r.phone != null { `${r.phone}` } else { "" },
+          address: if r.address != null { `${r.address}` } else { "" },
+          createdAt: `${r.created_at}`
+        };
+        Some(sup)
+      } else {
+        None
+      }
+    },
+    Err(_) => None
+  }
+};
+
+// Lists all registered suppliers using Aura ORM SelectBuilder
+export async fn (repo: PostgresSupplierRepository) FindAll(): Task<[]Supplier, String> => {
+  let query = repo.orm.SelectFrom("suppliers")
+    .Select("id")
+    .Select("name")
+    .Select("email")
+    .Select("tax_id")
+    .Select("phone")
+    .Select("address")
+    .Select("created_at")
+    .OrderBy("name", "ASC")
+    .ToSql();
+
+  let res = await repo.supplierDb.query(query.sql, query.params);
+
+  match res {
+    Ok(rows) => {
+      let mut list: []Supplier = [];
+      for r in rows {
+        let sup: Supplier = {
+          id: `${r.id}`,
+          name: `${r.name}`,
+          email: `${r.email}`,
+          taxId: `${r.tax_id}`,
+          phone: if r.phone != null { `${r.phone}` } else { "" },
+          address: if r.address != null { `${r.address}` } else { "" },
+          createdAt: `${r.created_at}`
+        };
+        list = append(list, sup);
+      }
+      list
+    },
+    Err(_) => {
+      let empty: []Supplier = [];
+      empty
+    }
+  }
+};

@@ -1,0 +1,2 @@
+# vendored dependencies for github.com/auraprojects/aura-order-db
+github.com/aura-lang-developer/aura-orm main

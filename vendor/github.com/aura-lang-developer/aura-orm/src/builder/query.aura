@@ -1,0 +1,614 @@
+// ==============================================================================
+// Aura ORM - Query Builder Module
+// src/builder/query.aura - Fluent SQL Builder for SELECT, INSERT, UPDATE, DELETE
+// ==============================================================================
+
+import { Dialect, PostgresDialect, QuoteIdentifier, FormatPlaceholder } from "../dialect/dialect";
+
+export struct SqlQuery {
+  sql: String,
+  params: []String
+};
+
+fn joinStrings(list: []String, sep: String): String => {
+  let count = len(list);
+  if count == 0 {
+    ""
+  } else {
+    let mut res = list[0];
+    let mut i = 1;
+    while i < count {
+      res = `${res}${sep}${list[i]}`;
+      i = i + 1;
+    }
+    res
+  }
+};
+
+// ==============================================================================
+// SELECT Query Builder
+// ==============================================================================
+
+export struct SelectBuilder {
+  __aura_type: String,
+  table: String,
+  fields: []String,
+  joins: []String,
+  whereClauses: []String,
+  params: []String,
+  groupBys: []String,
+  orderBys: []String,
+  limitVal: Int,
+  offsetVal: Int,
+  dialect: Dialect
+};
+
+export fn NewSelect(table: String, dialect: Dialect): SelectBuilder => {
+  let emptyFields: []String = [];
+  let emptyJoins: []String = [];
+  let emptyWheres: []String = [];
+  let emptyParams: []String = [];
+  let emptyGroup: []String = [];
+  let emptyOrder: []String = [];
+
+  {
+    __aura_type: "SelectBuilder",
+    table: table,
+    fields: emptyFields,
+    joins: emptyJoins,
+    whereClauses: emptyWheres,
+    params: emptyParams,
+    groupBys: emptyGroup,
+    orderBys: emptyOrder,
+    limitVal: -1,
+    offsetVal: -1,
+    dialect: dialect
+  }
+};
+
+export fn (b: SelectBuilder) Select(field: String): SelectBuilder => {
+  let mut newFields = b.fields;
+  newFields.push(field);
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: newFields,
+    joins: b.joins,
+    whereClauses: b.whereClauses,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) Where(column: String, op: String, value: String): SelectBuilder => {
+  let mut newParams = b.params;
+  newParams.push(value);
+  let paramIdx = len(newParams);
+  let ph = FormatPlaceholder(b.dialect, paramIdx);
+  let clause = `${column} ${op} ${ph}`;
+
+  let mut newWheres = b.whereClauses;
+  newWheres.push(clause);
+
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: newWheres,
+    params: newParams,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) WhereNull(column: String): SelectBuilder => {
+  let mut newWheres = b.whereClauses;
+  newWheres.push(`${column} IS NULL`);
+
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: newWheres,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) WhereNotNull(column: String): SelectBuilder => {
+  let mut newWheres = b.whereClauses;
+  newWheres.push(`${column} IS NOT NULL`);
+
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: newWheres,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) Join(joinType: String, table: String, onCondition: String): SelectBuilder => {
+  let mut newJoins = b.joins;
+  newJoins.push(`${joinType} JOIN ${table} ON ${onCondition}`);
+
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: newJoins,
+    whereClauses: b.whereClauses,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) GroupBy(field: String): SelectBuilder => {
+  let mut newGroups = b.groupBys;
+  newGroups.push(field);
+
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: b.whereClauses,
+    params: b.params,
+    groupBys: newGroups,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) OrderBy(field: String, direction: String): SelectBuilder => {
+  let mut newOrders = b.orderBys;
+  newOrders.push(`${field} ${direction}`);
+
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: b.whereClauses,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: newOrders,
+    limitVal: b.limitVal,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) Limit(limit: Int): SelectBuilder => {
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: b.whereClauses,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: limit,
+    offsetVal: b.offsetVal,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) Offset(offset: Int): SelectBuilder => {
+  {
+    __aura_type: "SelectBuilder",
+    table: b.table,
+    fields: b.fields,
+    joins: b.joins,
+    whereClauses: b.whereClauses,
+    params: b.params,
+    groupBys: b.groupBys,
+    orderBys: b.orderBys,
+    limitVal: b.limitVal,
+    offsetVal: offset,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: SelectBuilder) ToSql(): SqlQuery => {
+  let fieldsPart = if len(b.fields) == 0 {
+    "*"
+  } else {
+    joinStrings(b.fields, ", ")
+  };
+
+  let mut sql = `SELECT ${fieldsPart} FROM ${b.table}`;
+
+  if len(b.joins) > 0 {
+    let joinsPart = joinStrings(b.joins, " ");
+    sql = `${sql} ${joinsPart}`;
+  };
+
+  if len(b.whereClauses) > 0 {
+    let wherePart = joinStrings(b.whereClauses, " AND ");
+    sql = `${sql} WHERE ${wherePart}`;
+  };
+
+  if len(b.groupBys) > 0 {
+    let groupPart = joinStrings(b.groupBys, ", ");
+    sql = `${sql} GROUP BY ${groupPart}`;
+  };
+
+  if len(b.orderBys) > 0 {
+    let orderPart = joinStrings(b.orderBys, ", ");
+    sql = `${sql} ORDER BY ${orderPart}`;
+  };
+
+  if b.limitVal >= 0 {
+    sql = `${sql} LIMIT ${b.limitVal}`;
+  };
+
+  if b.offsetVal >= 0 {
+    sql = `${sql} OFFSET ${b.offsetVal}`;
+  };
+
+  sql = `${sql};`;
+
+  {
+    sql: sql,
+    params: b.params
+  }
+};
+
+// ==============================================================================
+// INSERT Query Builder
+// ==============================================================================
+
+export struct InsertBuilder {
+  __aura_type: String,
+  table: String,
+  columns: []String,
+  values: []String,
+  isRawList: []Bool,
+  returningCols: []String,
+  conflictTarget: String,
+  conflictAction: String,
+  dialect: Dialect
+};
+
+export fn NewInsert(table: String, dialect: Dialect): InsertBuilder => {
+  let emptyCols: []String = [];
+  let emptyVals: []String = [];
+  let emptyRaw: []Bool = [];
+  let emptyRet: []String = [];
+
+  {
+    __aura_type: "InsertBuilder",
+    table: table,
+    columns: emptyCols,
+    values: emptyVals,
+    isRawList: emptyRaw,
+    returningCols: emptyRet,
+    conflictTarget: "",
+    conflictAction: "",
+    dialect: dialect
+  }
+};
+
+export fn (b: InsertBuilder) Set(column: String, value: String): InsertBuilder => {
+  let mut newCols = b.columns;
+  newCols.push(column);
+
+  let mut newVals = b.values;
+  newVals.push(value);
+
+  let mut newRaw = b.isRawList;
+  newRaw.push(false);
+
+  {
+    __aura_type: "InsertBuilder",
+    table: b.table,
+    columns: newCols,
+    values: newVals,
+    isRawList: newRaw,
+    returningCols: b.returningCols,
+    conflictTarget: b.conflictTarget,
+    conflictAction: b.conflictAction,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: InsertBuilder) SetRaw(column: String, rawExpr: String): InsertBuilder => {
+  let mut newCols = b.columns;
+  newCols.push(column);
+
+  let mut newVals = b.values;
+  newVals.push(rawExpr);
+
+  let mut newRaw = b.isRawList;
+  newRaw.push(true);
+
+  {
+    __aura_type: "InsertBuilder",
+    table: b.table,
+    columns: newCols,
+    values: newVals,
+    isRawList: newRaw,
+    returningCols: b.returningCols,
+    conflictTarget: b.conflictTarget,
+    conflictAction: b.conflictAction,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: InsertBuilder) Returning(col: String): InsertBuilder => {
+  let mut newRet = b.returningCols;
+  newRet.push(col);
+
+  {
+    __aura_type: "InsertBuilder",
+    table: b.table,
+    columns: b.columns,
+    values: b.values,
+    isRawList: b.isRawList,
+    returningCols: newRet,
+    conflictTarget: b.conflictTarget,
+    conflictAction: b.conflictAction,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: InsertBuilder) OnConflictDoNothing(conflictTarget: String): InsertBuilder => {
+  {
+    __aura_type: "InsertBuilder",
+    table: b.table,
+    columns: b.columns,
+    values: b.values,
+    isRawList: b.isRawList,
+    returningCols: b.returningCols,
+    conflictTarget: conflictTarget,
+    conflictAction: "DO NOTHING",
+    dialect: b.dialect
+  }
+};
+
+export fn (b: InsertBuilder) OnConflictDoUpdate(conflictTarget: String, updateAssignments: []String): InsertBuilder => {
+  let updateClause = `DO UPDATE SET ${joinStrings(updateAssignments, ", ")}`;
+  {
+    __aura_type: "InsertBuilder",
+    table: b.table,
+    columns: b.columns,
+    values: b.values,
+    isRawList: b.isRawList,
+    returningCols: b.returningCols,
+    conflictTarget: conflictTarget,
+    conflictAction: updateClause,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: InsertBuilder) ToSql(): SqlQuery => {
+  let colCount = len(b.columns);
+  let mut placeholders: []String = [];
+  let mut paramValues: []String = [];
+  let mut paramCounter = 0;
+
+  let mut i = 0;
+  while i < colCount {
+    if b.isRawList[i] {
+      placeholders.push(b.values[i]);
+    } else {
+      paramCounter = paramCounter + 1;
+      let ph = FormatPlaceholder(b.dialect, paramCounter);
+      placeholders.push(ph);
+      paramValues.push(b.values[i]);
+    };
+    i = i + 1;
+  }
+
+  let colsPart = joinStrings(b.columns, ", ");
+  let valsPart = joinStrings(placeholders, ", ");
+
+  let mut sql = `INSERT INTO ${b.table} (${colsPart}) VALUES (${valsPart})`;
+
+  if len(b.conflictTarget) > 0 {
+    sql = `${sql} ON CONFLICT (${b.conflictTarget}) ${b.conflictAction}`;
+  };
+
+  if len(b.returningCols) > 0 && b.dialect.name == "postgres" {
+    let retPart = joinStrings(b.returningCols, ", ");
+    sql = `${sql} RETURNING ${retPart}`;
+  };
+
+  sql = `${sql};`;
+
+  {
+    sql: sql,
+    params: paramValues
+  }
+};
+
+// ==============================================================================
+// UPDATE Query Builder
+// ==============================================================================
+
+export struct UpdateBuilder {
+  __aura_type: String,
+  table: String,
+  setColumns: []String,
+  setValues: []String,
+  whereClauses: []String,
+  whereValues: []String,
+  dialect: Dialect
+};
+
+export fn NewUpdate(table: String, dialect: Dialect): UpdateBuilder => {
+  let emptySetCols: []String = [];
+  let emptySetVals: []String = [];
+  let emptyWhereClauses: []String = [];
+  let emptyWhereVals: []String = [];
+
+  {
+    __aura_type: "UpdateBuilder",
+    table: table,
+    setColumns: emptySetCols,
+    setValues: emptySetVals,
+    whereClauses: emptyWhereClauses,
+    whereValues: emptyWhereVals,
+    dialect: dialect
+  }
+};
+
+export fn (b: UpdateBuilder) Set(column: String, value: String): UpdateBuilder => {
+  let mut newCols = b.setColumns;
+  newCols.push(column);
+
+  let mut newVals = b.setValues;
+  newVals.push(value);
+
+  {
+    __aura_type: "UpdateBuilder",
+    table: b.table,
+    setColumns: newCols,
+    setValues: newVals,
+    whereClauses: b.whereClauses,
+    whereValues: b.whereValues,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: UpdateBuilder) Where(column: String, op: String, value: String): UpdateBuilder => {
+  let mut newWheres = b.whereClauses;
+  let mut newWhereVals = b.whereValues;
+
+  newWhereVals.push(value);
+  let totalParamIdx = len(b.setValues) + len(newWhereVals);
+  let ph = FormatPlaceholder(b.dialect, totalParamIdx);
+  newWheres.push(`${column} ${op} ${ph}`);
+
+  {
+    __aura_type: "UpdateBuilder",
+    table: b.table,
+    setColumns: b.setColumns,
+    setValues: b.setValues,
+    whereClauses: newWheres,
+    whereValues: newWhereVals,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: UpdateBuilder) ToSql(): SqlQuery => {
+  let mut setParts: []String = [];
+  let count = len(b.setColumns);
+  let mut i = 0;
+  while i < count {
+    let ph = FormatPlaceholder(b.dialect, i + 1);
+    setParts.push(`${b.setColumns[i]} = ${ph}`);
+    i = i + 1;
+  }
+
+  let setClause = joinStrings(setParts, ", ");
+  let mut sql = `UPDATE ${b.table} SET ${setClause}`;
+
+  if len(b.whereClauses) > 0 {
+    let wherePart = joinStrings(b.whereClauses, " AND ");
+    sql = `${sql} WHERE ${wherePart}`;
+  };
+
+  sql = `${sql};`;
+
+  // Merge setValues and whereValues
+  let mut allParams: []String = [];
+  for sv in b.setValues {
+    allParams.push(sv);
+  }
+  for wv in b.whereValues {
+    allParams.push(wv);
+  }
+
+  {
+    sql: sql,
+    params: allParams
+  }
+};
+
+// ==============================================================================
+// DELETE Query Builder
+// ==============================================================================
+
+export struct DeleteBuilder {
+  __aura_type: String,
+  table: String,
+  whereClauses: []String,
+  params: []String,
+  dialect: Dialect
+};
+
+export fn NewDelete(table: String, dialect: Dialect): DeleteBuilder => {
+  let emptyWheres: []String = [];
+  let emptyParams: []String = [];
+
+  {
+    __aura_type: "DeleteBuilder",
+    table: table,
+    whereClauses: emptyWheres,
+    params: emptyParams,
+    dialect: dialect
+  }
+};
+
+export fn (b: DeleteBuilder) Where(column: String, op: String, value: String): DeleteBuilder => {
+  let mut newParams = b.params;
+  newParams.push(value);
+  let paramIdx = len(newParams);
+  let ph = FormatPlaceholder(b.dialect, paramIdx);
+  let clause = `${column} ${op} ${ph}`;
+
+  let mut newWheres = b.whereClauses;
+  newWheres.push(clause);
+
+  {
+    __aura_type: "DeleteBuilder",
+    table: b.table,
+    whereClauses: newWheres,
+    params: newParams,
+    dialect: b.dialect
+  }
+};
+
+export fn (b: DeleteBuilder) ToSql(): SqlQuery => {
+  let mut sql = `DELETE FROM ${b.table}`;
+
+  if len(b.whereClauses) > 0 {
+    let wherePart = joinStrings(b.whereClauses, " AND ");
+    sql = `${sql} WHERE ${wherePart}`;
+  };
+
+  sql = `${sql};`;
+
+  {
+    sql: sql,
+    params: b.params
+  }
+};

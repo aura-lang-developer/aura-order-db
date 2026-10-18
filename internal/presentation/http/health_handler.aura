@@ -1,0 +1,44 @@
+// ==============================================================================
+// Presentation Layer: Health Check Handler
+// internal/presentation/http/health_handler.aura - Probes PostgreSQL & Service Status
+// ==============================================================================
+
+import { GinContext } from "../../../../gin/context";
+import { AppConfig } from "../../infrastructure/config/config";
+import { PingDatabase } from "../../infrastructure/persistence/db_connection";
+
+export struct HealthHttpHandler {
+  config: AppConfig,
+  db: PgPool
+};
+
+export fn NewHealthHttpHandler(config: AppConfig, db: PgPool): HealthHttpHandler => {
+  { config: config, db: db }
+}
+
+export async fn (h: HealthHttpHandler) HandleHealth(c: GinContext): Task<Unit, String> => {
+  let pingRes = await PingDatabase(h.db);
+  match pingRes {
+    Ok(_) => {
+      c.JSON(StatusOK, {
+        status: "UP",
+        service: h.config.serviceName,
+        version: h.config.version,
+        database: "PostgreSQL (Connected)",
+        databaseUser: h.config.dbUser,
+        databaseName: h.config.dbName,
+        timestamp: time.isoString()
+      });
+    },
+    Err(err) => {
+      c.JSON(503, {
+        status: "DOWN",
+        service: h.config.serviceName,
+        version: h.config.version,
+        database: "PostgreSQL (Disconnected)",
+        error: err,
+        timestamp: time.isoString()
+      });
+    }
+  }
+};

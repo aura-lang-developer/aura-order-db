@@ -1,0 +1,239 @@
+// ==============================================================================
+// Unit Test Suite: Domain Layer
+// tests/domain_test.aura - Tests Invariants, Pricing & State Transitions
+// ==============================================================================
+
+import {
+  PurchaseOrder,
+  OrderItem,
+  NewPurchaseOrder,
+  NewOrderItem,
+  StatusPendingApproval,
+  StatusApproved,
+  StatusCancelled,
+  StatusFulfilled
+} from "../internal/domain/model/order";
+import { Supplier, NewSupplier } from "../internal/domain/model/supplier";
+import { PricingCalculator, NewPricingCalculator } from "../internal/domain/service/pricing_calculator";
+import { NewDomainEvent, EventOrderCreated } from "../internal/domain/events";
+
+export fn main(): Unit => {
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧪 DOMAIN LAYER UNIT TESTS (ONION ARCHITECTURE)");
+  println("================================================================================");
+
+  // TEST 1: Supplier Creation & Invariants
+  println("\n[TEST 1] Supplier Creation & Field Validation:");
+  let supRes = NewSupplier("SUP-001", "Acme Industrial", "info@acme.com", "TAX-12345", "+1-555-0100", "123 Main St");
+  match supRes {
+    Ok(s) => {
+      if s.id == "SUP-001" && s.name == "Acme Industrial" {
+        println("  ✓ PASS: Supplier instantiated with correct fields");
+        passed += 1;
+      } else {
+        println("  ✕ FAIL: Supplier fields mismatch");
+        failed += 1;
+      };
+      ();
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Unexpected error: ${e}`);
+      failed += 1;
+      ();
+    }
+  };
+
+  // TEST 2: OrderItem Validation (Quantity & Price)
+  println("\n[TEST 2] OrderItem Validation Invariants:");
+  let invalidQty = NewOrderItem("PO-1", "SKU-01", "Widget", 0, 10.0);
+  match invalidQty {
+    Ok(_) => {
+      println("  ✕ FAIL: Zero quantity should be rejected");
+      failed += 1;
+      ();
+    },
+    Err(err) => {
+      println(`  ✓ PASS: Correctly rejected invalid quantity -> ${err}`);
+      passed += 1;
+      ();
+    }
+  };
+
+  let validItem = NewOrderItem("PO-1", "SKU-01", "Precision Bearing", 5, 20.0);
+  match validItem {
+    Ok(item) => {
+      if item.lineTotal == 100.0 {
+        println("  ✓ PASS: Line total correctly computed (5 * 20 = 100.0)");
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Expected line total 100.0, got ${item.lineTotal}`);
+        failed += 1;
+      };
+      ();
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Valid item creation failed: ${e}`);
+      failed += 1;
+      ();
+    }
+  };
+
+  // TEST 3: Pricing Calculator Service (Taxes and Volume Discount)
+  println("\n[TEST 3] Pricing Calculator Service:");
+  let calc = NewPricingCalculator(0.19, 5000.0, 0.05);
+
+  // Case A: Below volume discount threshold ($1,000)
+  let totalsA = calc.CalculateTotals(1000.0);
+  if totalsA.discountAmount == 0.0 && totalsA.taxAmount == 190.0 && totalsA.totalAmount == 1190.0 {
+    println("  ✓ PASS: Standard pricing without discount ($1000 -> Tax: $190, Total: $1190)");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Unexpected totals: subtotal=${totalsA.subtotal}, tax=${totalsA.taxAmount}, total=${totalsA.totalAmount}`);
+    failed += 1;
+  };
+
+  // Case B: At or above threshold ($10,000) -> 5% discount = $500, Taxable base = $9500, Tax 19% = $1805, Total = $11305
+  let totalsB = calc.CalculateTotals(10000.0);
+  if totalsB.discountAmount == 500.0 && totalsB.taxAmount == 1805.0 && totalsB.totalAmount == 11305.0 {
+    println("  ✓ PASS: Volume discount pricing applied ($10000 -> Disc: $500, Tax: $1805, Total: $11305)");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Unexpected totals for volume discount: ${totalsB.totalAmount}`);
+    failed += 1;
+  };
+
+  // TEST 4: PurchaseOrder State Machine Transitions
+  println("\n[TEST 4] PurchaseOrder State Machine Transitions:");
+  let mut itemsList: []OrderItem = [];
+  match validItem {
+    Ok(it) => {
+      itemsList = append(itemsList, it);
+      ();
+    },
+    Err(_) => {
+      ();
+    }
+  };
+
+  let poRes = NewPurchaseOrder(
+    "PO-100",
+    "OC-2026-001",
+    "SUP-001",
+    "USD",
+    "Urgent industrial order",
+    "procurement_agent",
+    itemsList,
+    100.0,
+    19.0,
+    0.0,
+    119.0
+  );
+
+  match poRes {
+    Ok(po) => {
+      let mut order = po;
+      if order.status == StatusPendingApproval() {
+        println("  ✓ PASS: Initial order status is PENDING_APPROVAL");
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Expected PENDING_APPROVAL, got ${order.status}`);
+        failed += 1;
+      };
+
+      // Transition: Approve
+      let appRes = order.Approve();
+      match appRes {
+        Ok(_) => {
+          if order.status == StatusApproved() {
+            println("  ✓ PASS: Order transitioned to APPROVED");
+            passed += 1;
+          } else {
+            println("  ✕ FAIL: Status not updated to APPROVED");
+            failed += 1;
+          };
+          ();
+        },
+        Err(e) => {
+          println(`  ✕ FAIL: Approval error: ${e}`);
+          failed += 1;
+          ();
+        }
+      };
+
+      // Invariant: Cannot approve already approved order
+      let appAgain = order.Approve();
+      match appAgain {
+        Ok(_) => {
+          println("  ✕ FAIL: Double approval should have failed");
+          failed += 1;
+          ();
+        },
+        Err(err) => {
+          println(`  ✓ PASS: Double approval correctly rejected -> ${err}`);
+          passed += 1;
+          ();
+        }
+      };
+
+      // Transition: Fulfill
+      let fulRes = order.Fulfill();
+      match fulRes {
+        Ok(_) => {
+          if order.status == StatusFulfilled() {
+            println("  ✓ PASS: Order transitioned to FULFILLED");
+            passed += 1;
+          } else {
+            println("  ✕ FAIL: Status not updated to FULFILLED");
+            failed += 1;
+          };
+          ();
+        },
+        Err(e) => {
+          println(`  ✕ FAIL: Fulfill error: ${e}`);
+          failed += 1;
+          ();
+        }
+      };
+
+      // Invariant: Cannot cancel a fulfilled order
+      let canRes = order.Cancel("Vendor out of stock");
+      match canRes {
+        Ok(_) => {
+          println("  ✕ FAIL: Cancel on fulfilled order should have failed");
+          failed += 1;
+          ();
+        },
+        Err(err) => {
+          println(`  ✓ PASS: Cancellation on fulfilled order rejected -> ${err}`);
+          passed += 1;
+          ();
+        }
+      };
+      ();
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: NewPurchaseOrder error: ${e}`);
+      failed += 1;
+      ();
+    }
+  };
+
+  // TEST 5: Domain Events
+  println("\n[TEST 5] Domain Event Generation:");
+  let payloadObj: Any = { orderNumber: "OC-2026-001", total: 119.0 };
+  let evt = NewDomainEvent(EventOrderCreated(), "PO-100", payloadObj);
+  if evt.eventType == "PURCHASE_ORDER_CREATED" && evt.aggregateId == "PO-100" {
+    println("  ✓ PASS: Domain event created with correct metadata");
+    passed += 1;
+  } else {
+    println("  ✕ FAIL: Event metadata mismatch");
+    failed += 1;
+  };
+
+  println("--------------------------------------------------------------------------------");
+  println(`  📊 SUMMARY: ${passed} PASSED | ${failed} FAILED`);
+  println("================================================================================");
+}

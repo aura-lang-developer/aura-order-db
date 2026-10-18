@@ -1,0 +1,30 @@
+// ==============================================================================
+// Domain Layer: Domain Events
+// internal/domain/events.aura - Immutable notifications of business state changes
+// ==============================================================================
+
+export fn EventOrderCreated(): String => "PURCHASE_ORDER_CREATED";
+export fn EventOrderApproved(): String => "PURCHASE_ORDER_APPROVED";
+export fn EventOrderCancelled(): String => "PURCHASE_ORDER_CANCELLED";
+export fn EventOrderFulfilled(): String => "PURCHASE_ORDER_FULFILLED";
+
+export struct DomainEvent {
+  eventId: String,
+  eventType: String,
+  aggregateId: String,
+  aggregateType: String,
+  occurredAt: String,
+  payload: Any
+};
+
+export fn NewDomainEvent(eventType: String, aggregateId: String, payload: Any): DomainEvent => {
+  let id = `evt_${time.now()}_${aggregateId}`;
+  {
+    eventId: id,
+    eventType: eventType,
+    aggregateId: aggregateId,
+    aggregateType: "PurchaseOrder",
+    occurredAt: time.isoString(),
+    payload: payload
+  }
+}

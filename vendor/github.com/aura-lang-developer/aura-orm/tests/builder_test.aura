@@ -1,0 +1,192 @@
+// ==============================================================================
+// Unit Test Suite: Query Builder
+// tests/builder_test.aura - Tests SELECT, INSERT, UPDATE, DELETE & Multi-Dialect
+// ==============================================================================
+
+import { PostgresOrm, MysqlOrm, SqliteOrm } from "../src/orm";
+
+export fn main(): Unit => {
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🧪 AURA-ORM: QUERY BUILDER TEST SUITE");
+  println("================================================================================");
+
+  let pg = PostgresOrm();
+  let my = MysqlOrm();
+  let sqlite = SqliteOrm();
+
+  // ----------------------------------------------------------------------------
+  // TEST 1: PostgreSQL SELECT with WHERE, ORDER BY, LIMIT, OFFSET
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 1] PostgreSQL SELECT with parameters and pagination:");
+  let q1 = pg.SelectFrom("users")
+    .Select("id")
+    .Select("name")
+    .Select("email")
+    .Where("status", "=", "active")
+    .Where("age", ">=", "18")
+    .OrderBy("created_at", "DESC")
+    .Limit(10)
+    .Offset(20)
+    .ToSql();
+
+  let expectedSql1 = "SELECT id, name, email FROM users WHERE status = $1 AND age >= $2 ORDER BY created_at DESC LIMIT 10 OFFSET 20;";
+  if q1.sql == expectedSql1 && len(q1.params) == 2 && q1.params[0] == "active" && q1.params[1] == "18" {
+    println("  ✓ PASS: Correct PostgreSQL SELECT query and numbered placeholders");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql1}' but got '${q1.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 2: MySQL SELECT with question mark placeholders
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 2] MySQL SELECT with '?' placeholders:");
+  let q2 = my.SelectFrom("products")
+    .Select("sku")
+    .Select("price")
+    .Where("category", "=", "electronics")
+    .Where("stock", ">", "0")
+    .ToSql();
+
+  let expectedSql2 = "SELECT sku, price FROM products WHERE category = ? AND stock > ?;";
+  if q2.sql == expectedSql2 && len(q2.params) == 2 && q2.params[0] == "electronics" {
+    println("  ✓ PASS: Correct MySQL SELECT query with ? placeholders");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql2}' but got '${q2.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 3: SELECT with JOIN, GROUP BY and IS NULL
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 3] SELECT with INNER JOIN, GROUP BY and NULL condition:");
+  let q3 = pg.SelectFrom("orders")
+    .Select("orders.id")
+    .Select("customers.name")
+    .Join("INNER", "customers", "orders.customer_id = customers.id")
+    .WhereNull("orders.deleted_at")
+    .GroupBy("orders.id")
+    .ToSql();
+
+  let expectedSql3 = "SELECT orders.id, customers.name FROM orders INNER JOIN customers ON orders.customer_id = customers.id WHERE orders.deleted_at IS NULL GROUP BY orders.id;";
+  if q3.sql == expectedSql3 {
+    println("  ✓ PASS: Correct JOIN, WHERE NULL and GROUP BY");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql3}' but got '${q3.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 4: INSERT INTO with RETURNING (PostgreSQL)
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 4] PostgreSQL INSERT INTO with RETURNING:");
+  let q4 = pg.InsertInto("users")
+    .Set("name", "Alice")
+    .Set("email", "alice@example.com")
+    .Set("active", "true")
+    .Returning("id")
+    .Returning("created_at")
+    .ToSql();
+
+  let expectedSql4 = "INSERT INTO users (name, email, active) VALUES ($1, $2, $3) RETURNING id, created_at;";
+  if q4.sql == expectedSql4 && len(q4.params) == 3 && q4.params[0] == "Alice" {
+    println("  ✓ PASS: Correct INSERT with numbered placeholders and RETURNING");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql4}' but got '${q4.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 5: UPDATE Table with SET and WHERE
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 5] UPDATE with SET and WHERE:");
+  let q5 = pg.UpdateTable("users")
+    .Set("name", "Alice Smith")
+    .Set("status", "verified")
+    .Where("id", "=", "42")
+    .ToSql();
+
+  let expectedSql5 = "UPDATE users SET name = $1, status = $2 WHERE id = $3;";
+  if q5.sql == expectedSql5 && len(q5.params) == 3 && q5.params[2] == "42" {
+    println("  ✓ PASS: Correct UPDATE query with combined parameter indices");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql5}' but got '${q5.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 6: DELETE FROM with WHERE
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 6] DELETE FROM with WHERE:");
+  let q6 = sqlite.DeleteFrom("sessions")
+    .Where("expired", "=", "true")
+    .ToSql();
+
+  let expectedSql6 = "DELETE FROM sessions WHERE expired = ?;";
+  if q6.sql == expectedSql6 && len(q6.params) == 1 && q6.params[0] == "true" {
+    println("  ✓ PASS: Correct DELETE query with SQLite dialect");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql6}' but got '${q6.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 7: PostgreSQL INSERT with SetRaw and ON CONFLICT DO UPDATE
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 7] PostgreSQL INSERT with SetRaw and ON CONFLICT DO UPDATE:");
+  let q7 = pg.InsertInto("suppliers")
+    .Set("id", "SUP-001")
+    .Set("name", "Acme Corp")
+    .SetRaw("created_at", "CURRENT_TIMESTAMP")
+    .OnConflictDoUpdate("id", ["name = EXCLUDED.name"])
+    .ToSql();
+
+  let expectedSql7 = "INSERT INTO suppliers (id, name, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP) ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;";
+  if q7.sql == expectedSql7 && len(q7.params) == 2 && q7.params[0] == "SUP-001" && q7.params[1] == "Acme Corp" {
+    println("  ✓ PASS: Correct INSERT with raw SQL expression and ON CONFLICT DO UPDATE");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql7}' but got '${q7.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // TEST 8: PostgreSQL INSERT with ON CONFLICT DO NOTHING
+  // ----------------------------------------------------------------------------
+  println("\n[TEST 8] PostgreSQL INSERT with ON CONFLICT DO NOTHING:");
+  let q8 = pg.InsertInto("suppliers")
+    .Set("id", "SUP-002")
+    .OnConflictDoNothing("id")
+    .ToSql();
+
+  let expectedSql8 = "INSERT INTO suppliers (id) VALUES ($1) ON CONFLICT (id) DO NOTHING;";
+  if q8.sql == expectedSql8 && len(q8.params) == 1 && q8.params[0] == "SUP-002" {
+    println("  ✓ PASS: Correct INSERT with ON CONFLICT DO NOTHING");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected '${expectedSql8}' but got '${q8.sql}'`);
+    failed += 1;
+  };
+
+  // ----------------------------------------------------------------------------
+  // RESULTS SUMMARY
+  // ----------------------------------------------------------------------------
+  println("================================================================================");
+  println(`  🏁 SUMMARY: ${passed} Passed, ${failed} Failed`);
+  println("================================================================================");
+
+  if failed > 0 {
+    println("❌ Test suite encountered failures!");
+  } else {
+    println("✅ All query builder tests passed successfully!");
+  };
+}

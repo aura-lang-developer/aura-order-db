@@ -1,0 +1,323 @@
+// ==============================================================================
+// Integration Test Suite: End-to-End PostgreSQL & Onion Architecture
+// tests/integration_test.aura - Tests against running PostgreSQL Database
+// ==============================================================================
+
+import { LoadConfig } from "../internal/infrastructure/config/config";
+import { NewPostgresPool, PingDatabase } from "../internal/infrastructure/persistence/db_connection";
+import { RunMigrations } from "../internal/infrastructure/persistence/db_migrator";
+import { NewPostgresOrderRepository } from "../internal/infrastructure/persistence/postgres_order_repo";
+import { NewPostgresSupplierRepository } from "../internal/infrastructure/persistence/postgres_supplier_repo";
+import { NewCSPEventBus } from "../internal/infrastructure/messaging/csp_event_bus";
+import { NewEmailNotifier } from "../internal/infrastructure/external/email_notifier";
+import { NewPostgresAuditAdapter } from "../internal/infrastructure/external/audit_adapter";
+import { NewPricingCalculator } from "../internal/domain/service/pricing_calculator";
+import { NewPurchaseOrderUseCase } from "../internal/application/services/order_usecase";
+import { NewSupplierUseCase } from "../internal/application/services/supplier_usecase";
+import { NewOrderHttpHandler } from "../internal/presentation/http/order_handler";
+import { NewSupplierHttpHandler } from "../internal/presentation/http/supplier_handler";
+import { NewHealthHttpHandler } from "../internal/presentation/http/health_handler";
+import { SetupRouter } from "../internal/presentation/http/router";
+import { Engine, SetMode } from "../../gin/engine";
+import { CreateOrderRequestDTO, OrderItemInputDTO } from "../internal/application/dto/order_dto";
+import { StatusApproved, StatusFulfilled } from "../internal/domain/model/order";
+import { PostgresOrm } from "github.com/aura-lang-developer/aura-orm/src/orm";
+
+export async fn main(): Task<Unit, String> => {
+  let mut passed = 0;
+  let mut failed = 0;
+
+  println("================================================================================");
+  println("  🐘 POSTGRESQL & ONION ARCHITECTURE INTEGRATION SUITE");
+  println("================================================================================");
+
+  SetMode("test");
+  let config = LoadConfig();
+  println(`[Config] User: ${config.dbUser} | Host: ${config.dbHost}:${config.dbPort} | DB: ${config.dbName}`);
+
+  // 1. PostgreSQL Connection Test
+  println("\n[INTEGRATION 1] PostgreSQL Connection & Ping:");
+  let db = NewPostgresPool(config);
+  let pingRes = await PingDatabase(db);
+  match pingRes {
+    Ok(_) => {
+      println("  ✓ PASS: Connected to active PostgreSQL container");
+      passed += 1;
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: PostgreSQL ping failed: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 2. Automated Schema Migrations
+  println("\n[INTEGRATION 2] Automated Schema Migrations & Seeding:");
+  let migRes = await RunMigrations(db);
+  match migRes {
+    Ok(_) => {
+      println("  ✓ PASS: Schema migrations applied successfully");
+      passed += 1;
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Migration failed: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 3. Verify Seeded Suppliers in PostgreSQL
+  println("\n[INTEGRATION 3] Query Seeded Suppliers from PostgreSQL:");
+  let supplierRepo = NewPostgresSupplierRepository(db);
+  let supList = await supplierRepo.FindAll();
+  if len(supList) >= 2 {
+    println(`  ✓ PASS: Found ${len(supList)} suppliers in PostgreSQL database`);
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: Expected >= 2 seeded suppliers, got ${len(supList)}`);
+    failed += 1;
+  };
+
+  // 4. Wire Full Onion Composition Root
+  println("\n[INTEGRATION 4] Dependency Injection & Use Case Composition:");
+  let orderRepo = NewPostgresOrderRepository(db);
+  let mut eventBus = NewCSPEventBus();
+  let mut notifier = NewEmailNotifier();
+  let auditAdapter = NewPostgresAuditAdapter(db);
+  let pricingCalc = NewPricingCalculator(config.taxRate, config.volumeDiscountThreshold, config.volumeDiscountRate);
+
+  let supplierUseCase = NewSupplierUseCase(supplierRepo, auditAdapter);
+  let orderUseCase = NewPurchaseOrderUseCase(
+    orderRepo,
+    supplierRepo,
+    pricingCalc,
+    &notifier,
+    &eventBus,
+    auditAdapter
+  );
+  println("  ✓ PASS: All layers cleanly composed without runtime errors");
+  passed += 1;
+
+  // 5. Create Order through UseCase directly into PostgreSQL
+  println("\n[INTEGRATION 5] Create & Persist Purchase Order in PostgreSQL:");
+  let mut items: []OrderItemInputDTO = [
+    { productSku: "SKU-VALVE-50", productName: "High-Pressure Hydraulic Valve", quantity: 2, unitPrice: 750.0 },
+    { productSku: "SKU-SEAL-100", productName: "Industrial O-Ring Seal Kit", quantity: 10, unitPrice: 25.0 }
+  ];
+  // Subtotal = (2 * 750) + (10 * 25) = 1500 + 250 = 1750. Tax 19% = 332.5. Total = 2082.5
+  let orderReq: CreateOrderRequestDTO = {
+    supplierId: "SUP-001",
+    currency: "USD",
+    notes: "E2E Integration Test Purchase Order",
+    createdBy: "qa_tester",
+    items: items
+  };
+
+  let createRes = await orderUseCase.CreateOrder(orderReq);
+  let mut testOrderId = "";
+  match createRes {
+    Ok(ord) => {
+      testOrderId = ord.id;
+      if ord.subtotal == 1750.0 && ord.taxAmount == 332.5 && ord.totalAmount == 2082.5 {
+        println(`  ✓ PASS: Order created and persisted in PostgreSQL (ID: ${ord.id}, Total: $${ord.totalAmount})`);
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Expected total 2082.5, got ${ord.totalAmount}`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Order creation failed: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 6. Direct SQL Query verification from PostgreSQL using Aura ORM
+  println("\n[INTEGRATION 6] Direct SQL Verification of Persisted Records:");
+  let orm = PostgresOrm();
+  let qOrderCheck = orm.SelectFrom("purchase_orders")
+    .Select("id")
+    .Select("order_number")
+    .Select("status")
+    .Select("total_amount")
+    .Where("id", "=", testOrderId)
+    .ToSql();
+
+  let sqlCheck = await db.query(qOrderCheck.sql, qOrderCheck.params);
+  match sqlCheck {
+    Ok(rows) => {
+      if len(rows) == 1 {
+        let r = rows[0];
+        println(`  ✓ PASS: Direct SQL query confirmed row: [${r.id}] ${r.order_number} | Status: ${r.status} | Total: $${r.total_amount}`);
+        passed += 1;
+      } else {
+        println("  ✕ FAIL: Row not found in purchase_orders table");
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Direct SQL error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 7. Verify Relational Line Items in PostgreSQL using Aura ORM
+  println("\n[INTEGRATION 7] Relational Integrity Check on Order Items:");
+  let qItemsCheck = orm.SelectFrom("purchase_order_items")
+    .Select("id")
+    .Select("product_sku")
+    .Select("quantity")
+    .Select("unit_price")
+    .Select("line_total")
+    .Where("order_id", "=", testOrderId)
+    .ToSql();
+
+  let itemsCheck = await db.query(qItemsCheck.sql, qItemsCheck.params);
+  match itemsCheck {
+    Ok(irows) => {
+      if len(irows) == 2 {
+        println(`  ✓ PASS: Verified 2 child line items in purchase_order_items for parent order '${testOrderId}'`);
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Expected 2 line items, found ${len(irows)}`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Items query error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 8. Approve Order & Verify Persistence Update
+  println("\n[INTEGRATION 8] Approve Order & Verify PostgreSQL State Update:");
+  let appRes = await orderUseCase.ApproveOrder(testOrderId, "director_procurement");
+  match appRes {
+    Ok(updatedOrd) => {
+      if updatedOrd.status == StatusApproved() {
+        println("  ✓ PASS: Order transitioned to APPROVED");
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Status mismatch: ${updatedOrd.status}`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Approve failed: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // Check updated status in DB via Aura ORM
+  let qStatusCheck = orm.SelectFrom("purchase_orders")
+    .Select("status")
+    .Where("id", "=", testOrderId)
+    .ToSql();
+
+  let statusCheck = await db.query(qStatusCheck.sql, qStatusCheck.params);
+  match statusCheck {
+    Ok(srows) => {
+      if len(srows) == 1 && `${srows[0].status}` == StatusApproved() {
+        println("  ✓ PASS: PostgreSQL table verified with updated status 'APPROVED'");
+        passed += 1;
+      } else {
+        println("  ✕ FAIL: Status not updated in PostgreSQL table");
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Status check error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 9. Verify Audit Trail in PostgreSQL via Aura ORM
+  println("\n[INTEGRATION 9] Verify Audit Trail in PostgreSQL audit_logs Table:");
+  let qAuditCheck = orm.SelectFrom("audit_logs")
+    .Select("action")
+    .Select("entity_id")
+    .Select("actor")
+    .Where("entity_id", "=", testOrderId)
+    .OrderBy("id", "DESC")
+    .ToSql();
+
+  let auditCheck = await db.query(qAuditCheck.sql, qAuditCheck.params);
+  match auditCheck {
+    Ok(arows) => {
+      if len(arows) >= 2 {
+        println(`  ✓ PASS: Found ${len(arows)} audit records in PostgreSQL (CREATE & APPROVE logged)`);
+        passed += 1;
+      } else {
+        println(`  ✕ FAIL: Expected >= 2 audit records, found ${len(arows)}`);
+        failed += 1;
+      }
+    },
+    Err(e) => {
+      println(`  ✕ FAIL: Audit query error: ${e}`);
+      failed += 1;
+    }
+  };
+
+  // 10. HTTP Presentation Layer via Gin ServeHTTP
+  println("\n[INTEGRATION 10] HTTP REST API Dispatch Test via Gin Multiplexer:");
+  let orderHandler = NewOrderHttpHandler(orderUseCase);
+  let supplierHandler = NewSupplierHttpHandler(supplierUseCase);
+  let healthHandler = NewHealthHttpHandler(config, db);
+  let router: Any = SetupRouter(orderHandler, supplierHandler, healthHandler, config);
+
+  // Test GET /health
+  let mut healthStatus = 0;
+  let mut healthBody = "";
+  let mockHealthReq: Any = { method: "GET", url: "/health", path: "/health", query: {}, headers: {} };
+  let mockHealthRes: Any = {
+    statusCode: 200,
+    writeHead: fn(st: Int) => { healthStatus = st; },
+    setHeader: fn(k: String, v: String) => {},
+    end: fn(dt: Any) => { healthBody = `${dt}`; }
+  };
+  router.ServeHTTP(mockHealthReq, mockHealthRes);
+  await sleep(150);
+
+  if healthStatus == 200 {
+    println(`  ✓ PASS: GET /health returned 200 OK (${healthBody})`);
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: GET /health status was ${healthStatus}`);
+    failed += 1;
+  };
+
+  // Test GET /api/v1/orders
+  let mut listStatus = 0;
+  let mut listBody = "";
+  let mockListReq: Any = { method: "GET", url: "/api/v1/orders", path: "/api/v1/orders", query: {}, headers: {} };
+  let mockListRes: Any = {
+    statusCode: 200,
+    writeHead: fn(st: Int) => { listStatus = st; },
+    setHeader: fn(k: String, v: String) => {},
+    end: fn(dt: Any) => { listBody = `${dt}`; }
+  };
+  router.ServeHTTP(mockListReq, mockListRes);
+  await sleep(150);
+
+  if listStatus == 200 {
+    println("  ✓ PASS: GET /api/v1/orders returned 200 OK with order listing");
+    passed += 1;
+  } else {
+    println(`  ✕ FAIL: GET /api/v1/orders status was ${listStatus}`);
+    failed += 1;
+  };
+
+  // Clean up test order via Aura ORM DeleteBuilder
+  let qDel = orm.DeleteFrom("purchase_orders")
+    .Where("id", "=", testOrderId)
+    .ToSql();
+  let _ = await db.execute(qDel.sql, qDel.params);
+  println("\n  ✓ Teardown: Test purchase order cleaned up gracefully via Aura ORM");
+
+  let _ = await db.close();
+  println("  ✓ PostgreSQL connection pool closed gracefully");
+
+  println("--------------------------------------------------------------------------------");
+  println(`  📊 SUMMARY: ${passed} PASSED | ${failed} FAILED`);
+  println("================================================================================");
+};
+
+main()

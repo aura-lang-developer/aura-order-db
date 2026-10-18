@@ -1,0 +1,32 @@
+// ==============================================================================
+// Domain Layer: Pure Business Errors
+// internal/domain/errors.aura - Zero External Dependencies
+// ==============================================================================
+
+export fn ErrOrderNotFound(): String => "ERR_ORDER_NOT_FOUND: Purchase order not found";
+export fn ErrSupplierNotFound(): String => "ERR_SUPPLIER_NOT_FOUND: Supplier not found in registry";
+export fn ErrEmptyOrderItems(): String => "ERR_EMPTY_ORDER_ITEMS: Purchase order must contain at least one line item";
+export fn ErrInvalidItemQuantity(): String => "ERR_INVALID_ITEM_QUANTITY: Item quantity must be greater than zero";
+export fn ErrInvalidUnitPrice(): String => "ERR_INVALID_UNIT_PRICE: Unit price must be greater than zero";
+export fn ErrInvalidStatusTransition(): String => "ERR_INVALID_STATUS_TRANSITION: Invalid state transition for purchase order";
+export fn ErrOrderAlreadyApproved(): String => "ERR_ORDER_ALREADY_APPROVED: Purchase order is already approved";
+export fn ErrOrderAlreadyCancelled(): String => "ERR_ORDER_ALREADY_CANCELLED: Purchase order is already cancelled";
+export fn ErrOrderAlreadyFulfilled(): String => "ERR_ORDER_ALREADY_FULFILLED: Purchase order is already fulfilled";
+export fn ErrCannotCancelFulfilled(): String => "ERR_CANNOT_CANCEL_FULFILLED: Cannot cancel a fulfilled purchase order";
+export fn ErrInvalidSupplierData(): String => "ERR_INVALID_SUPPLIER_DATA: Supplier name, email, and tax ID are required";
+
+export fn FormatOrderNotFound(id: String): String => {
+  `${ErrOrderNotFound()} (ID: ${id})`
+}
+
+export fn FormatSupplierNotFound(id: String): String => {
+  `${ErrSupplierNotFound()} (ID: ${id})`
+}
+
+export fn FormatInvalidStatusTransition(current: String, target: String): String => {
+  `${ErrInvalidStatusTransition()}: Cannot transition from '${current}' to '${target}'`
+}
+
+export fn IsDomainError(err: String): Bool => {
+  err.startsWith("ERR_")
+}
